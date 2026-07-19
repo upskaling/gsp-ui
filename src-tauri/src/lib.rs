@@ -29,6 +29,10 @@ struct AppConfig {
     playback_speed: f32,
     #[serde(default)]
     dev_mode: bool,
+    #[serde(default)]
+    source_language: String,
+    #[serde(default)]
+    target_language: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -69,6 +73,8 @@ impl Default for AppConfig {
             },
             playback_speed: 1.0,
             dev_mode: false,
+            source_language: "auto".to_string(),
+            target_language: "fr".to_string(),
         }
     }
 }
@@ -243,6 +249,30 @@ fn save_dev_mode(enabled: bool) -> Result<(), String> {
     save_config(&config)
 }
 
+#[tauri::command]
+fn load_source_language() -> Result<String, String> {
+    load_config().map(|cfg| cfg.source_language)
+}
+
+#[tauri::command]
+fn save_source_language(language: String) -> Result<(), String> {
+    let mut config = load_config()?;
+    config.source_language = language;
+    save_config(&config)
+}
+
+#[tauri::command]
+fn load_target_language() -> Result<String, String> {
+    load_config().map(|cfg| cfg.target_language)
+}
+
+#[tauri::command]
+fn save_target_language(language: String) -> Result<(), String> {
+    let mut config = load_config()?;
+    config.target_language = language;
+    save_config(&config)
+}
+
 fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
     let mut keys = vec![];
     if shortcut.ctrl {
@@ -261,14 +291,24 @@ fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
     keys.join("+")
 }
 
-/// Traduit le texte en français si la langue détectée est l'anglais
-fn translate_to_french_if_english(
+fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
+    match detected_lang {
+        DetectedLanguage::English => "en",
+        DetectedLanguage::French => "fr",
+    }
+}
+
+fn translate_if_needed(
     text: &str,
     detected_lang: DetectedLanguage,
+    source_lang: &str,
+    target_lang: &str,
 ) -> Result<String, String> {
-    match detected_lang {
-        DetectedLanguage::English => {
-            eprintln!("[TRANSLATOR] Texte en anglais détecté, traduction en français...");
+    let detected_code = get_language_code(detected_lang);
+
+    if source_lang == "auto" {
+        if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
+            eprintln!("[TRANSLATOR] Détection automatique: texte en anglais, traduction en français...");
             match translate(text, "en", "fr") {
                 Ok(translated) => {
                     eprintln!("[TRANSLATOR] Traduction réussie");
@@ -276,12 +316,31 @@ fn translate_to_french_if_english(
                 }
                 Err(e) => {
                     eprintln!("[TRANSLATOR] Erreur de traduction: {}", e);
-                    eprintln!("[TRANSLATOR] Utilisation du texte original en anglais");
+                    eprintln!("[TRANSLATOR] Utilisation du texte original");
                     Ok(text.to_string())
                 }
             }
+        } else {
+            Ok(text.to_string())
         }
-        DetectedLanguage::French => Ok(text.to_string()),
+    } else if source_lang != target_lang {
+        eprintln!(
+            "[TRANSLATOR] Traduction de {} en {}...",
+            source_lang, target_lang
+        );
+        match translate(text, source_lang, target_lang) {
+            Ok(translated) => {
+                eprintln!("[TRANSLATOR] Traduction réussie");
+                Ok(translated)
+            }
+            Err(e) => {
+                eprintln!("[TRANSLATOR] Erreur de traduction: {}", e);
+                eprintln!("[TRANSLATOR] Utilisation du texte original");
+                Ok(text.to_string())
+            }
+        }
+    } else {
+        Ok(text.to_string())
     }
 }
 
@@ -352,7 +411,12 @@ fn speak(
     let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
 
-    let text_to_speak = translate_to_french_if_english(&cleaned_text, detected_lang)?;
+    let config = load_config().ok();
+    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
+    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+
+    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
 
     let mut playback = state
         .lock()
@@ -367,10 +431,7 @@ fn speak(
 
     eprintln!("[SPEAK] Création du TTS engine");
     let mut tts = EspeakNg::new();
-    tts.set_lang("fr".to_string());
-
-    // Charger la vitesse sauvegardée
-    let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
+    tts.set_lang(target_lang.to_string());
 
     // Convertir le multiplicateur (1.0-2.0) en valeur eSpeak (50-200)
     let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
@@ -461,7 +522,12 @@ fn speak_clipboard(
     let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
 
-    let text_to_speak = translate_to_french_if_english(&cleaned_text, detected_lang)?;
+    let config = load_config().ok();
+    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
+    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+
+    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
 
     let mut playback = state
         .lock()
@@ -479,9 +545,7 @@ fn speak_clipboard(
 
     eprintln!("[SPEAK_CLIPBOARD] Création du TTS engine");
     let mut tts = EspeakNg::new();
-    tts.set_lang("fr".to_string());
-
-    let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
+    tts.set_lang(target_lang.to_string());
 
     let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
     tts.set_speed(espeak_speed);
@@ -547,6 +611,10 @@ pub fn run() {
             save_playback_speed,
             load_dev_mode,
             save_dev_mode,
+            load_source_language,
+            save_source_language,
+            load_target_language,
+            save_target_language,
             speak,
             stop_speak,
             speak_clipboard

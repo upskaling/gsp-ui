@@ -24,6 +24,17 @@ const recordingKey = ref(false);
 const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
 const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
+const sourceLanguage = ref("auto");
+const targetLanguage = ref("fr");
+const sourceLanguageOptions = [
+  { code: "auto", label: "Détection automatique" },
+  { code: "fr", label: "Français" },
+  { code: "en", label: "English" }
+];
+const targetLanguageOptions = [
+  { code: "fr", label: "Français" },
+  { code: "en", label: "English" }
+];
 const devMode = ref(false);
 let shortcutInProgress = false;
 
@@ -117,6 +128,46 @@ async function toggleDevMode() {
   }
 }
 
+async function loadSourceLanguage() {
+  try {
+    sourceLanguage.value = await invoke("load_source_language");
+    console.log("[loadSourceLanguage] Langue source chargée:", sourceLanguage.value);
+  } catch (error) {
+    console.error("Erreur lors du chargement de la langue source:", error);
+  }
+}
+
+async function setSourceLanguage(lang: string) {
+  console.log("[setSourceLanguage] Nouvelle langue source:", lang);
+  sourceLanguage.value = lang;
+  try {
+    await invoke("save_source_language", { language: lang });
+    console.log("[setSourceLanguage] Langue source sauvegardée");
+  } catch (error) {
+    console.error("Erreur lors de la sauvegarde de la langue source:", error);
+  }
+}
+
+async function loadTargetLanguage() {
+  try {
+    targetLanguage.value = await invoke("load_target_language");
+    console.log("[loadTargetLanguage] Langue cible chargée:", targetLanguage.value);
+  } catch (error) {
+    console.error("Erreur lors du chargement de la langue cible:", error);
+  }
+}
+
+async function setTargetLanguage(lang: string) {
+  console.log("[setTargetLanguage] Nouvelle langue cible:", lang);
+  targetLanguage.value = lang;
+  try {
+    await invoke("save_target_language", { language: lang });
+    console.log("[setTargetLanguage] Langue cible sauvegardée");
+  } catch (error) {
+    console.error("Erreur lors de la sauvegarde de la langue cible:", error);
+  }
+}
+
 async function setPlaybackSpeed(speed: number) {
   console.log("[setPlaybackSpeed] Nouvelle vitesse:", speed);
   playbackSpeed.value = speed;
@@ -156,6 +207,8 @@ async function saveShortcutConfig() {
 onMounted(async () => {
   await loadShortcutConfig();
   await loadPlaybackSpeed();
+  await loadSourceLanguage();
+  await loadTargetLanguage();
   await loadDevMode();
   window.addEventListener("keydown", handleKeydown);
 
@@ -225,6 +278,34 @@ onUnmounted(() => {
           >
             <option v-for="speed in speedOptions" :key="speed" :value="speed">
               {{ speed }}x
+            </option>
+          </select>
+        </div>
+        <div class="language-controls">
+          <label for="source-lang-select">Source:</label>
+          <select
+            id="source-lang-select"
+            v-model="sourceLanguage"
+            @change="setSourceLanguage(sourceLanguage)"
+            :disabled="isSpeaking"
+            class="language-select"
+          >
+            <option v-for="lang in sourceLanguageOptions" :key="lang.code" :value="lang.code">
+              {{ lang.label }}
+            </option>
+          </select>
+        </div>
+        <div class="language-controls">
+          <label for="target-lang-select">Parler:</label>
+          <select
+            id="target-lang-select"
+            v-model="targetLanguage"
+            @change="setTargetLanguage(targetLanguage)"
+            :disabled="isSpeaking"
+            class="language-select"
+          >
+            <option v-for="lang in targetLanguageOptions" :key="lang.code" :value="lang.code">
+              {{ lang.label }}
             </option>
           </select>
         </div>
