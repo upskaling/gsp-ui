@@ -21,6 +21,12 @@ use textutils::{preprocess_text, read_vars};
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
+macro_rules! debug {
+    ($tag:expr, $($arg:tt)*) => {
+        eprintln!("[{}] {}", $tag, format!($($arg)*))
+    };
+}
+
 struct PlaybackState {
     child_pid: Option<u32>,
 }
@@ -126,6 +132,15 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))
 }
 
+fn update_config<F>(f: F) -> Result<(), String>
+where
+    F: FnOnce(&mut AppConfig),
+{
+    let mut config = load_config()?;
+    f(&mut config);
+    save_config(&config)
+}
+
 fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     let icon_bytes = include_bytes!("../icons/icon.png");
     let img = image::load_from_memory(icon_bytes)
@@ -140,75 +155,76 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     Ok(Image::new(static_data, width, height))
 }
 
+fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
+    let mut keys = vec![];
+    if shortcut.ctrl {
+        keys.push("ctrl");
+    }
+    if shortcut.shift {
+        keys.push("shift");
+    }
+    if shortcut.alt {
+        keys.push("alt");
+    }
+    if shortcut.meta {
+        keys.push("meta");
+    }
+    keys.push(&shortcut.key);
+    keys.join("+")
+}
+
+fn register_shortcut_internal(
+    app_handle: &AppHandle,
+    shortcut_str: &str,
+    is_ocr: bool,
+    log_prefix: &str,
+) -> Result<(), String> {
+    let shortcut = shortcut_str
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
+
+    debug!(log_prefix, "Tentative de désenregistrement du raccourci précédent");
+
+    let unregister_result = app_handle.global_shortcut().unregister(shortcut);
+    debug!(log_prefix, "Résultat du désenregistrement: {:?}", unregister_result);
+
+    debug!(log_prefix, "Enregistrement du raccourci");
+    app_handle
+        .global_shortcut()
+        .on_shortcut(shortcut, move |app, _accelerator, _state| {
+            let event_name = if is_ocr {
+                "global_shortcut_ocr_triggered"
+            } else {
+                "global_shortcut_triggered"
+            };
+            debug!("CALLBACK", "Raccourci déclenché!");
+            if let Some(window) = app.get_webview_window("main") {
+                debug!("CALLBACK", "Émission de {}", event_name);
+                let _ = window.emit(event_name, ());
+            }
+        })
+        .map_err(|e| format!("Erreur lors de l'enregistrement: {:?}", e))?;
+
+    debug!(log_prefix, "Raccourci enregistré avec succès");
+    Ok(())
+}
+
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
-    eprintln!("[SETUP] Début de setup_global_shortcut()");
+    debug!("SETUP", "Début de setup_global_shortcut()");
     let app_handle = app.handle().clone();
 
     if let Ok(config) = load_config() {
-        // Enregistrer le raccourci clipboard
         let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-        eprintln!("[SETUP] Raccourci clipboard à enregistrer: {}", shortcut_str);
+        debug!("SETUP", "Raccourci clipboard à enregistrer: {}", shortcut_str);
 
-        match shortcut_str.parse::<Shortcut>() {
-            Ok(shortcut) => {
-                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci clipboard");
-                if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut, move |app, _accelerator, _state| {
-                    eprintln!("[SHORTCUT CALLBACK] Raccourci clipboard déclenché!");
-                    if let Some(window) = app.get_webview_window("main") {
-                        eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_triggered");
-                        let _ = window.emit("global_shortcut_triggered", ());
-                    }
-                }) {
-                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci clipboard: {:?}", e);
-                    return Err(format!("Erreur lors de l'enregistrement du raccourci clipboard: {:?}", e));
-                }
-                eprintln!(
-                    "[SETUP] Raccourci clipboard enregistré avec succès: {}",
-                    shortcut_str
-                );
-            }
-            Err(e) => {
-                eprintln!(
-                    "[SETUP] Erreur lors du parsing du raccourci clipboard {}: {:?}",
-                    shortcut_str, e
-                );
-                return Err(format!("Erreur lors du parsing du raccourci clipboard: {:?}", e));
-            }
-        }
+        register_shortcut_internal(&app_handle, &shortcut_str, false, "SETUP")?;
 
-        // Enregistrer le raccourci OCR
         let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
-        eprintln!("[SETUP] Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
+        debug!("SETUP", "Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
 
-        match ocr_shortcut_str.parse::<Shortcut>() {
-            Ok(shortcut) => {
-                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci OCR");
-                if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut, move |app, _accelerator, _state| {
-                    eprintln!("[SHORTCUT CALLBACK] Raccourci OCR déclenché!");
-                    if let Some(window) = app.get_webview_window("main") {
-                        eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_ocr_triggered");
-                        let _ = window.emit("global_shortcut_ocr_triggered", ());
-                    }
-                }) {
-                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci OCR: {:?}", e);
-                    return Err(format!("Erreur lors de l'enregistrement du raccourci OCR: {:?}", e));
-                }
-                eprintln!(
-                    "[SETUP] Raccourci OCR enregistré avec succès: {}",
-                    ocr_shortcut_str
-                );
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!(
-                    "[SETUP] Erreur lors du parsing du raccourci OCR {}: {:?}",
-                    ocr_shortcut_str, e
-                );
-                Err(format!("Erreur lors du parsing du raccourci OCR: {:?}", e))
-            }
-        }
+        register_shortcut_internal(&app_handle, &ocr_shortcut_str, true, "SETUP")
     } else {
-        eprintln!("[SETUP] Impossible de charger la configuration");
+        debug!("SETUP", "Impossible de charger la configuration");
         Err("Impossible de charger la configuration".to_string())
     }
 }
@@ -265,9 +281,7 @@ fn load_shortcut_config() -> Result<ClipboardShortcut, String> {
 
 #[tauri::command]
 fn save_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.clipboard_shortcut = shortcut.clone();
-    save_config(&config)
+    update_config(|cfg| cfg.clipboard_shortcut = shortcut)
 }
 
 #[tauri::command]
@@ -277,9 +291,7 @@ fn load_ocr_shortcut_config() -> Result<ClipboardShortcut, String> {
 
 #[tauri::command]
 fn save_ocr_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.ocr_shortcut = shortcut.clone();
-    save_config(&config)
+    update_config(|cfg| cfg.ocr_shortcut = shortcut)
 }
 
 #[tauri::command]
@@ -289,9 +301,7 @@ fn load_playback_speed() -> Result<f32, String> {
 
 #[tauri::command]
 fn save_playback_speed(speed: f32) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.playback_speed = speed.clamp(0.5, 2.0);
-    save_config(&config)
+    update_config(|cfg| cfg.playback_speed = speed.clamp(0.5, 2.0))
 }
 
 #[tauri::command]
@@ -301,9 +311,7 @@ fn load_dev_mode() -> Result<bool, String> {
 
 #[tauri::command]
 fn save_dev_mode(enabled: bool) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.dev_mode = enabled;
-    save_config(&config)
+    update_config(|cfg| cfg.dev_mode = enabled)
 }
 
 #[tauri::command]
@@ -313,9 +321,7 @@ fn load_source_language() -> Result<String, String> {
 
 #[tauri::command]
 fn save_source_language(language: String) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.source_language = language;
-    save_config(&config)
+    update_config(|cfg| cfg.source_language = language)
 }
 
 #[tauri::command]
@@ -325,27 +331,7 @@ fn load_target_language() -> Result<String, String> {
 
 #[tauri::command]
 fn save_target_language(language: String) -> Result<(), String> {
-    let mut config = load_config()?;
-    config.target_language = language;
-    save_config(&config)
-}
-
-fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
-    let mut keys = vec![];
-    if shortcut.ctrl {
-        keys.push("ctrl");
-    }
-    if shortcut.shift {
-        keys.push("shift");
-    }
-    if shortcut.alt {
-        keys.push("alt");
-    }
-    if shortcut.meta {
-        keys.push("meta");
-    }
-    keys.push(&shortcut.key);
-    keys.join("+")
+    update_config(|cfg| cfg.target_language = language)
 }
 
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
@@ -365,15 +351,15 @@ fn translate_if_needed(
 
     if source_lang == "auto" {
         if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
-            eprintln!("[TRANSLATOR] Détection automatique: texte en anglais, traduction en français...");
+            debug!("TRANSLATOR", "Détection automatique: texte en anglais, traduction en français...");
             match translate(text, "en", "fr") {
                 Ok(translated) => {
-                    eprintln!("[TRANSLATOR] Traduction réussie");
+                    debug!("TRANSLATOR", "Traduction réussie");
                     Ok(translated)
                 }
                 Err(e) => {
-                    eprintln!("[TRANSLATOR] Erreur de traduction: {}", e);
-                    eprintln!("[TRANSLATOR] Utilisation du texte original");
+                    debug!("TRANSLATOR", "Erreur de traduction: {}", e);
+                    debug!("TRANSLATOR", "Utilisation du texte original");
                     Ok(text.to_string())
                 }
             }
@@ -381,18 +367,15 @@ fn translate_if_needed(
             Ok(text.to_string())
         }
     } else if source_lang != target_lang {
-        eprintln!(
-            "[TRANSLATOR] Traduction de {} en {}...",
-            source_lang, target_lang
-        );
+        debug!("TRANSLATOR", "Traduction de {} en {}...", source_lang, target_lang);
         match translate(text, source_lang, target_lang) {
             Ok(translated) => {
-                eprintln!("[TRANSLATOR] Traduction réussie");
+                debug!("TRANSLATOR", "Traduction réussie");
                 Ok(translated)
             }
             Err(e) => {
-                eprintln!("[TRANSLATOR] Erreur de traduction: {}", e);
-                eprintln!("[TRANSLATOR] Utilisation du texte original");
+                debug!("TRANSLATOR", "Erreur de traduction: {}", e);
+                debug!("TRANSLATOR", "Utilisation du texte original");
                 Ok(text.to_string())
             }
         }
@@ -401,74 +384,94 @@ fn translate_if_needed(
     }
 }
 
+struct SpeechPipelineInput {
+    text: String,
+    source_lang: String,
+    target_lang: String,
+    playback_speed: f32,
+    dev_mode: bool,
+}
+
+fn execute_speech_pipeline(
+    input: SpeechPipelineInput,
+    state: State<Mutex<PlaybackState>>,
+    app_handle: AppHandle,
+    log_tag: &str,
+) -> Result<(), String> {
+    debug!(log_tag, "Début avec texte: {}", input.text);
+
+    let text_to_process = if input.dev_mode {
+        debug!(log_tag, "Mode développeur activé, application de read_vars");
+        read_vars(&input.text)
+    } else {
+        input.text.clone()
+    };
+
+    let cleaned_text = preprocess_text(&text_to_process);
+    debug!(log_tag, "Texte nettoyé: {}", cleaned_text);
+
+    let detected_lang = detect_language(&cleaned_text);
+    debug!(log_tag, "Langue détectée: {:?}", detected_lang);
+
+    let text_to_speak =
+        translate_if_needed(&cleaned_text, detected_lang, &input.source_lang, &input.target_lang)?;
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+
+    if let Some(pid) = playback.child_pid.take() {
+        debug!(log_tag, "Arrêt du processus précédent (PID: {})", pid);
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+
+    drop(playback);
+
+    debug!(log_tag, "Création du TTS engine");
+    let mut tts = EspeakNg::new();
+    tts.set_lang(input.target_lang.clone());
+
+    let espeak_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
+    tts.set_speed(espeak_speed);
+
+    debug!(log_tag, "Vitesse de lecture: {} (espeak: {})", input.playback_speed, espeak_speed);
+    debug!(log_tag, "Appel de tts.speak()");
+    let mut child = tts.speak(&text_to_speak)?;
+    let pid = child.id();
+    debug!(log_tag, "Child lancé avec PID: {}", pid);
+
+    let app_handle_clone = app_handle.clone();
+    debug!(log_tag, "Lancement du thread d'attente");
+    std::thread::spawn(move || {
+        debug!("THREAD", "Attente du processus PID: {}", pid);
+        let _ = child.wait();
+        debug!("THREAD", "Processus terminé, émission de playback_finished");
+        if let Some(window) = app_handle_clone.get_webview_window("main") {
+            let _ = window.emit("playback_finished", ());
+        }
+    });
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    playback.child_pid = Some(pid);
+    debug!(log_tag, "PID {} stocké dans state", pid);
+
+    Ok(())
+}
+
 #[tauri::command]
 fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
-    eprintln!("[REGISTER] Début de register_global_shortcut()");
+    debug!("REGISTER", "Début de register_global_shortcut()");
     let config = load_config()?;
 
-    // Enregistrer le raccourci clipboard
     let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-    let shortcut = shortcut_str
-        .parse::<Shortcut>()
-        .map_err(|e| format!("Erreur lors du parsing du raccourci clipboard: {:?}", e))?;
+    debug!("REGISTER", "Raccourci clipboard à enregistrer: {}", shortcut_str);
+    register_shortcut_internal(&app_handle, &shortcut_str, false, "REGISTER")?;
 
-    eprintln!("[REGISTER] Raccourci clipboard à enregistrer: {}", shortcut_str);
-    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci clipboard précédent");
-
-    let unregister_result = app_handle.global_shortcut().unregister(shortcut);
-    eprintln!(
-        "[REGISTER] Résultat du désenregistrement clipboard: {:?}",
-        unregister_result
-    );
-
-    eprintln!("[REGISTER] Enregistrement du raccourci clipboard");
-    app_handle
-        .global_shortcut()
-        .on_shortcut(shortcut, move |app, _accelerator, _state| {
-            eprintln!("[REGISTER CALLBACK] Raccourci clipboard déclenché!");
-            if let Some(window) = app.get_webview_window("main") {
-                eprintln!("[REGISTER CALLBACK] Émission de global_shortcut_triggered");
-                let _ = window.emit("global_shortcut_triggered", ());
-            }
-        })
-        .map_err(|e| {
-            format!(
-                "Erreur lors de l'enregistrement du raccourci clipboard {}: {:?}",
-                shortcut_str, e
-            )
-        })?;
-
-    // Enregistrer le raccourci OCR
     let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
-    let ocr_shortcut = ocr_shortcut_str
-        .parse::<Shortcut>()
-        .map_err(|e| format!("Erreur lors du parsing du raccourci OCR: {:?}", e))?;
-
-    eprintln!("[REGISTER] Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
-    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci OCR précédent");
-
-    let unregister_result = app_handle.global_shortcut().unregister(ocr_shortcut);
-    eprintln!(
-        "[REGISTER] Résultat du désenregistrement OCR: {:?}",
-        unregister_result
-    );
-
-    eprintln!("[REGISTER] Enregistrement du raccourci OCR");
-    app_handle
-        .global_shortcut()
-        .on_shortcut(ocr_shortcut, move |app, _accelerator, _state| {
-            eprintln!("[REGISTER CALLBACK] Raccourci OCR déclenché!");
-            if let Some(window) = app.get_webview_window("main") {
-                eprintln!("[REGISTER CALLBACK] Émission de global_shortcut_ocr_triggered");
-                let _ = window.emit("global_shortcut_ocr_triggered", ());
-            }
-        })
-        .map_err(|e| {
-            format!(
-                "Erreur lors de l'enregistrement du raccourci OCR {}: {:?}",
-                ocr_shortcut_str, e
-            )
-        })
+    debug!("REGISTER", "Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
+    register_shortcut_internal(&app_handle, &ocr_shortcut_str, true, "REGISTER")
 }
 
 #[tauri::command]
@@ -492,76 +495,27 @@ fn speak(
     state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    eprintln!("[SPEAK] Début de speak() avec texte: {}", text);
-
     let config = load_config().ok();
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
-
-    let text_to_process = if dev_mode {
-        eprintln!("[SPEAK] Mode développeur activé, application de read_vars");
-        read_vars(&text)
-    } else {
-        text.clone()
-    };
-
-    let cleaned_text = preprocess_text(&text_to_process);
-    eprintln!("[SPEAK] Texte nettoyé: {}", cleaned_text);
-
-    let detected_lang = detect_language(&cleaned_text);
-    eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
-
-    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
-    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let source_lang = config
+        .as_ref()
+        .map(|c| c.source_language.clone())
+        .unwrap_or_else(|| "auto".to_string());
+    let target_lang = config
+        .as_ref()
+        .map(|c| c.target_language.clone())
+        .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
 
-    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
+    let pipeline = SpeechPipelineInput {
+        text,
+        source_lang,
+        target_lang,
+        playback_speed,
+        dev_mode,
+    };
 
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-
-    if let Some(pid) = playback.child_pid.take() {
-        eprintln!("[SPEAK] Arrêt du processus précédent (PID: {})", pid);
-        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-    }
-
-    drop(playback);
-
-    eprintln!("[SPEAK] Création du TTS engine");
-    let mut tts = EspeakNg::new();
-    tts.set_lang(target_lang.to_string());
-
-    // Convertir le multiplicateur (1.0-2.0) en valeur eSpeak (50-200)
-    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
-    tts.set_speed(espeak_speed);
-
-    eprintln!(
-        "[SPEAK] Vitesse de lecture: {} (espeak: {})",
-        playback_speed, espeak_speed
-    );
-    eprintln!("[SPEAK] Appel de tts.speak()");
-    let mut child = tts.speak(&text_to_speak)?;
-    let pid = child.id();
-    eprintln!("[SPEAK] Child lancé avec PID: {}", pid);
-
-    let app_handle_clone = app_handle.clone();
-    eprintln!("[SPEAK] Lancement du thread d'attente");
-    std::thread::spawn(move || {
-        eprintln!("[THREAD] Attente du processus PID: {}", pid);
-        let _ = child.wait();
-        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
-        if let Some(window) = app_handle_clone.get_webview_window("main") {
-            let _ = window.emit("playback_finished", ());
-        }
-    });
-
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-    playback.child_pid = Some(pid);
-    eprintln!("[SPEAK] PID {} stocké dans state", pid);
-
-    Ok(())
+    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK")
 }
 
 #[tauri::command]
@@ -572,7 +526,7 @@ fn speak_ocr(
     use std::fs;
     use std::time::SystemTime;
 
-    eprintln!("[SPEAK_OCR] Début de speak_ocr()");
+    debug!("SPEAK_OCR", "Début de speak_ocr()");
 
     let temp_dir = std::env::temp_dir();
     let timestamp = SystemTime::now()
@@ -585,23 +539,23 @@ fn speak_ocr(
         .to_str()
         .ok_or_else(|| "Impossible de convertir le chemin en string".to_string())?;
 
-    eprintln!("[SPEAK_OCR] Chemin de capture: {}", screenshot_path_str);
-    eprintln!("[SPEAK_OCR] Lancement de xfce4-screenshooter");
+    debug!("SPEAK_OCR", "Chemin de capture: {}", screenshot_path_str);
+    debug!("SPEAK_OCR", "Lancement de xfce4-screenshooter");
 
     xfce4_screenshooter_region(screenshot_path_str);
 
-    eprintln!("[SPEAK_OCR] Attente de la création du fichier");
-    std::thread::sleep(std::time::Duration::from_secs(2));
-
     if !screenshot_path.exists() {
-        eprintln!("[SPEAK_OCR] Erreur: le fichier de capture n'a pas été créé");
+        debug!("SPEAK_OCR", "Erreur: le fichier de capture n'a pas été créé");
         return Err("La capture d'écran a échoué".to_string());
     }
 
-    eprintln!("[SPEAK_OCR] Fichier de capture créé");
+    debug!("SPEAK_OCR", "Fichier de capture créé");
 
     let config = load_config().ok();
-    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
+    let source_lang = config
+        .as_ref()
+        .map(|c| c.source_language.as_str())
+        .unwrap_or("auto");
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
 
     let tesseract_lang = match source_lang {
@@ -613,100 +567,49 @@ fn speak_ocr(
         _ => "en-GB",
     };
 
-    eprintln!("[SPEAK_OCR] Exécution de Tesseract avec la langue: {}", tesseract_lang);
+    debug!("SPEAK_OCR", "Exécution de Tesseract avec la langue: {}", tesseract_lang);
     let text = tesseract(screenshot_path_str, tesseract_lang);
 
     if text.is_empty() {
-        eprintln!("[SPEAK_OCR] Erreur: Tesseract n'a pas reconnu de texte");
+        debug!("SPEAK_OCR", "Erreur: Tesseract n'a pas reconnu de texte");
         let _ = fs::remove_file(&screenshot_path);
         return Err("Aucun texte reconnu par OCR".to_string());
     }
 
-    eprintln!(
-        "[SPEAK_OCR] Texte reconnu: {}",
-        text.chars().take(50).collect::<String>()
-    );
+    debug!("SPEAK_OCR", "Texte reconnu: {}", text.chars().take(50).collect::<String>());
 
     let _ = fs::remove_file(&screenshot_path);
 
-    let text_to_process = if dev_mode {
-        eprintln!("[SPEAK_OCR] Mode développeur activé, application de read_vars");
-        read_vars(&text)
-    } else {
-        text.clone()
-    };
-
-    let cleaned_text = preprocess_text(&text_to_process);
-    eprintln!("[SPEAK_OCR] Texte nettoyé: {}", cleaned_text);
-
-    let detected_lang = detect_language(&cleaned_text);
-    eprintln!("[SPEAK_OCR] Langue détectée: {:?}", detected_lang);
-
-    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let target_lang = config
+        .as_ref()
+        .map(|c| c.target_language.clone())
+        .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
 
-    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
+    let pipeline = SpeechPipelineInput {
+        text,
+        source_lang: source_lang.to_string(),
+        target_lang,
+        playback_speed,
+        dev_mode,
+    };
 
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-
-    if let Some(pid) = playback.child_pid.take() {
-        eprintln!("[SPEAK_OCR] Arrêt du processus précédent (PID: {})", pid);
-        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-    }
-
-    drop(playback);
-
-    eprintln!("[SPEAK_OCR] Création du TTS engine");
-    let mut tts = EspeakNg::new();
-    tts.set_lang(target_lang.to_string());
-
-    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
-    tts.set_speed(espeak_speed);
-
-    eprintln!(
-        "[SPEAK_OCR] Vitesse de lecture: {} (espeak: {})",
-        playback_speed, espeak_speed
-    );
-    eprintln!("[SPEAK_OCR] Appel de tts.speak()");
-    let mut child = tts.speak(&text_to_speak)?;
-    let pid = child.id();
-    eprintln!("[SPEAK_OCR] Child lancé avec PID: {}", pid);
-
-    let app_handle_clone = app_handle.clone();
-    eprintln!("[SPEAK_OCR] Lancement du thread d'attente");
-    std::thread::spawn(move || {
-        eprintln!("[THREAD] Attente du processus PID: {}", pid);
-        let _ = child.wait();
-        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
-        if let Some(window) = app_handle_clone.get_webview_window("main") {
-            let _ = window.emit("playback_finished", ());
-        }
-    });
-
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-    playback.child_pid = Some(pid);
-    eprintln!("[SPEAK_OCR] PID {} stocké dans state", pid);
-
-    Ok(())
+    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_OCR")
 }
 
 #[tauri::command]
 fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
-    eprintln!("[STOP_SPEAK] Début de stop_speak()");
+    debug!("STOP_SPEAK", "Début de stop_speak()");
     let mut playback = state
         .lock()
         .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
 
     if let Some(pid) = playback.child_pid.take() {
-        eprintln!("[STOP_SPEAK] Arrêt du processus PID: {}", pid);
+        debug!("STOP_SPEAK", "Arrêt du processus PID: {}", pid);
         let kill_result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-        eprintln!("[STOP_SPEAK] Résultat de kill: {}", kill_result);
+        debug!("STOP_SPEAK", "Résultat de kill: {}", kill_result);
     } else {
-        eprintln!("[STOP_SPEAK] Aucun processus à arrêter");
+        debug!("STOP_SPEAK", "Aucun processus à arrêter");
     }
 
     Ok(())
@@ -719,7 +622,7 @@ fn speak_clipboard(
 ) -> Result<(), String> {
     use x11_clipboard::Clipboard;
 
-    eprintln!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
+    debug!("SPEAK_CLIPBOARD", "Début de speak_clipboard()");
 
     let clipboard =
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
@@ -739,81 +642,29 @@ fn speak_clipboard(
             String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
         })?;
 
-    eprintln!(
-        "[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}",
-        text.chars().take(50).collect::<String>()
-    );
+    debug!("SPEAK_CLIPBOARD", "Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
 
     let config = load_config().ok();
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
-
-    let text_to_process = if dev_mode {
-        eprintln!("[SPEAK_CLIPBOARD] Mode développeur activé, application de read_vars");
-        read_vars(&text)
-    } else {
-        text.clone()
-    };
-
-    let cleaned_text = preprocess_text(&text_to_process);
-    eprintln!("[SPEAK_CLIPBOARD] Texte nettoyé: {}", cleaned_text);
-
-    let detected_lang = detect_language(&cleaned_text);
-    eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
-
-    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
-    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let source_lang = config
+        .as_ref()
+        .map(|c| c.source_language.clone())
+        .unwrap_or_else(|| "auto".to_string());
+    let target_lang = config
+        .as_ref()
+        .map(|c| c.target_language.clone())
+        .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
 
-    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
+    let pipeline = SpeechPipelineInput {
+        text,
+        source_lang,
+        target_lang,
+        playback_speed,
+        dev_mode,
+    };
 
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-
-    if let Some(pid) = playback.child_pid.take() {
-        eprintln!(
-            "[SPEAK_CLIPBOARD] Arrêt du processus précédent (PID: {})",
-            pid
-        );
-        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-    }
-
-    drop(playback);
-
-    eprintln!("[SPEAK_CLIPBOARD] Création du TTS engine");
-    let mut tts = EspeakNg::new();
-    tts.set_lang(target_lang.to_string());
-
-    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
-    tts.set_speed(espeak_speed);
-
-    eprintln!(
-        "[SPEAK_CLIPBOARD] Vitesse de lecture: {} (espeak: {})",
-        playback_speed, espeak_speed
-    );
-    eprintln!("[SPEAK_CLIPBOARD] Appel de tts.speak()");
-    let mut child = tts.speak(&text_to_speak)?;
-    let pid = child.id();
-    eprintln!("[SPEAK_CLIPBOARD] Child lancé avec PID: {}", pid);
-
-    let app_handle_clone = app_handle.clone();
-    eprintln!("[SPEAK_CLIPBOARD] Lancement du thread d'attente");
-    std::thread::spawn(move || {
-        eprintln!("[THREAD] Attente du processus PID: {}", pid);
-        let _ = child.wait();
-        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
-        if let Some(window) = app_handle_clone.get_webview_window("main") {
-            let _ = window.emit("playback_finished", ());
-        }
-    });
-
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-    playback.child_pid = Some(pid);
-    eprintln!("[SPEAK_CLIPBOARD] PID {} stocké dans state", pid);
-
-    Ok(())
+    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_CLIPBOARD")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
