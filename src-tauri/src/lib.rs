@@ -1,4 +1,5 @@
 mod tts;
+mod textutils;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
@@ -21,6 +22,8 @@ struct AppConfig {
     clipboard_shortcut: ClipboardShortcut,
     #[serde(default)]
     playback_speed: f32,
+    #[serde(default)]
+    dev_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -60,6 +63,7 @@ impl Default for AppConfig {
                 key: "c".to_string(),
             },
             playback_speed: 1.0,
+            dev_mode: false,
         }
     }
 }
@@ -213,6 +217,18 @@ fn load_playback_speed() -> Result<f32, String> {
 fn save_playback_speed(speed: f32) -> Result<(), String> {
     let mut config = load_config()?;
     config.playback_speed = speed.clamp(0.5, 2.0);
+    save_config(&config)
+}
+
+#[tauri::command]
+fn load_dev_mode() -> Result<bool, String> {
+    load_config().map(|cfg| cfg.dev_mode)
+}
+
+#[tauri::command]
+fn save_dev_mode(enabled: bool) -> Result<(), String> {
+    let mut config = load_config()?;
+    config.dev_mode = enabled;
     save_config(&config)
 }
 
@@ -433,6 +449,8 @@ pub fn run() {
             unregister_global_shortcut,
             load_playback_speed,
             save_playback_speed,
+            load_dev_mode,
+            save_dev_mode,
             speak,
             stop_speak,
             speak_clipboard

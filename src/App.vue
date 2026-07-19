@@ -24,6 +24,7 @@ const recordingKey = ref(false);
 const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
 const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
+const devMode = ref(false);
 let shortcutInProgress = false;
 
 async function speakSelection() {
@@ -76,7 +77,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 
   if (matches) {
     event.preventDefault();
-    getClipboardContent();
+    speakSelection();
   }
 };
 
@@ -94,6 +95,25 @@ async function loadPlaybackSpeed() {
     console.log("[loadPlaybackSpeed] Vitesse chargée:", playbackSpeed.value);
   } catch (error) {
     console.error("Erreur lors du chargement de la vitesse:", error);
+  }
+}
+
+async function loadDevMode() {
+  try {
+    devMode.value = await invoke("load_dev_mode");
+    console.log("[loadDevMode] Mode développeur chargé:", devMode.value);
+  } catch (error) {
+    console.error("Erreur lors du chargement du mode développeur:", error);
+  }
+}
+
+async function toggleDevMode() {
+  try {
+    console.log("[toggleDevMode] Sauvegarde du mode développeur:", devMode.value);
+    await invoke("save_dev_mode", { enabled: devMode.value });
+    console.log("[toggleDevMode] Mode développeur sauvegardé:", devMode.value);
+  } catch (error) {
+    console.error("Erreur lors de la sauvegarde du mode développeur:", error);
   }
 }
 
@@ -136,6 +156,7 @@ async function saveShortcutConfig() {
 onMounted(async () => {
   await loadShortcutConfig();
   await loadPlaybackSpeed();
+  await loadDevMode();
   window.addEventListener("keydown", handleKeydown);
 
   // Écouter quand la lecture se termine
@@ -210,6 +231,10 @@ onUnmounted(() => {
         <button @click="showShortcutConfig = !showShortcutConfig" class="config-btn">
           ⚙️ Configurer
         </button>
+        <label class="dev-mode-toggle">
+          <input type="checkbox" v-model="devMode" @change="toggleDevMode" />
+          🧪 Dev
+        </label>
       </div>
 
       <div v-if="showShortcutConfig" class="shortcut-config">

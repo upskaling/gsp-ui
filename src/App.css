@@ -153,6 +153,22 @@
   cursor: not-allowed;
 }
 
+.dev-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  margin-left: auto;
+}
+
+.dev-mode-toggle input[type="checkbox"] {
+  cursor: pointer;
+  padding: 0;
+  width: auto;
+  height: auto;
+}
+
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
