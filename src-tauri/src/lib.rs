@@ -17,7 +17,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-use textutils::preprocess_text;
+use textutils::{preprocess_text, read_vars};
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
@@ -494,13 +494,22 @@ fn speak(
 ) -> Result<(), String> {
     eprintln!("[SPEAK] Début de speak() avec texte: {}", text);
 
-    let cleaned_text = preprocess_text(&text);
+    let config = load_config().ok();
+    let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
+
+    let text_to_process = if dev_mode {
+        eprintln!("[SPEAK] Mode développeur activé, application de read_vars");
+        read_vars(&text)
+    } else {
+        text.clone()
+    };
+
+    let cleaned_text = preprocess_text(&text_to_process);
     eprintln!("[SPEAK] Texte nettoyé: {}", cleaned_text);
 
     let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
 
-    let config = load_config().ok();
     let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
     let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
@@ -593,6 +602,7 @@ fn speak_ocr(
 
     let config = load_config().ok();
     let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
+    let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
 
     let tesseract_lang = match source_lang {
         "auto" | "en" => "en-GB",
@@ -619,7 +629,14 @@ fn speak_ocr(
 
     let _ = fs::remove_file(&screenshot_path);
 
-    let cleaned_text = preprocess_text(&text);
+    let text_to_process = if dev_mode {
+        eprintln!("[SPEAK_OCR] Mode développeur activé, application de read_vars");
+        read_vars(&text)
+    } else {
+        text.clone()
+    };
+
+    let cleaned_text = preprocess_text(&text_to_process);
     eprintln!("[SPEAK_OCR] Texte nettoyé: {}", cleaned_text);
 
     let detected_lang = detect_language(&cleaned_text);
@@ -727,13 +744,22 @@ fn speak_clipboard(
         text.chars().take(50).collect::<String>()
     );
 
-    let cleaned_text = preprocess_text(&text);
+    let config = load_config().ok();
+    let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
+
+    let text_to_process = if dev_mode {
+        eprintln!("[SPEAK_CLIPBOARD] Mode développeur activé, application de read_vars");
+        read_vars(&text)
+    } else {
+        text.clone()
+    };
+
+    let cleaned_text = preprocess_text(&text_to_process);
     eprintln!("[SPEAK_CLIPBOARD] Texte nettoyé: {}", cleaned_text);
 
     let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
 
-    let config = load_config().ok();
     let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
     let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
