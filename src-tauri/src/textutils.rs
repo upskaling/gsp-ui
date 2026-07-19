@@ -277,6 +277,27 @@ fn create_character_mapping() -> HashMap<char, char> {
     mapping
 }
 
+/// Prétraite le texte (nettoyage complet avant traitement)
+///
+/// Applique les transformations dans cet ordre:
+/// 1. Parse les hashtags CamelCase
+/// 2. Normalise les espaces
+/// 3. Supprime les caractères spéciaux
+///
+/// # Exemples
+/// ```
+/// let text = "  #helloWorld  est  𝐠𝐫𝐚𝐬  ";
+/// let result = preprocess_text(text);
+/// assert_eq!(result, "#hello World est gras");
+/// ```
+pub fn preprocess_text(text: &str) -> String {
+    let mut text = text.to_string();
+    text = parse_hashtag(&text);
+    text = trim_whitespace(&text);
+    text = remove_special_characters(&text);
+    text
+}
+
 /// Remplace les termes selon le dictionnaire
 pub fn replace(text: &str) -> String {
     static DICT_PATH: &str = "dict/fr_FR";

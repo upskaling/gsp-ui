@@ -2,7 +2,6 @@
 //!
 //! Implémentation du trait TtsEngine pour eSpeak-NG.
 
-use crate::textutils::{read_vars, remove_special_characters, trim_whitespace};
 use std::process::{Child, Command};
 
 /// Trait pour les moteurs de synthèse vocale
@@ -41,18 +40,8 @@ impl EspeakNg {
     }
 }
 
-/// Prétraite le texte (nettoyage, formatage)
-fn preprocess_text(text: String) -> String {
-    let mut text = text;
-    text = read_vars(&text);
-    text = remove_special_characters(&text);
-    text = trim_whitespace(&text);
-    text
-}
-
 impl TtsEngine for EspeakNg {
     fn speak(&self, text: &str) -> Result<Child, String> {
-        let preprocessed_text = preprocess_text(text.to_string());
         let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
 
         let voice = if self.lang == "en" {
@@ -73,7 +62,7 @@ impl TtsEngine for EspeakNg {
             .arg("-w")
             .arg(self.output_file.as_str())
             .arg("--")
-            .arg(preprocessed_text)
+            .arg(text.to_string())
             .output();
 
         match result {

@@ -9,21 +9,7 @@ pub enum DetectedLanguage {
     English,
 }
 
-impl DetectedLanguage {
-    pub fn as_espeak_code(&self) -> &'static str {
-        match self {
-            DetectedLanguage::French => "fr",
-            DetectedLanguage::English => "en",
-        }
-    }
-
-    pub fn as_espeak_voice(&self) -> &'static str {
-        match self {
-            DetectedLanguage::French => "mb-FR4",
-            DetectedLanguage::English => "mb-EN1",
-        }
-    }
-}
+impl DetectedLanguage {}
 
 pub fn detect_language(text: &str) -> DetectedLanguage {
     let languages = vec![English, French];

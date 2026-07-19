@@ -13,6 +13,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+use textutils::preprocess_text;
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
@@ -131,7 +132,7 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
         match shortcut_str.parse::<Shortcut>() {
             Ok(shortcut) => {
                 eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci");
-                if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut.clone(), move |app, _accelerator, _state| {
+                if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut, move |app, _accelerator, _state| {
                     eprintln!("[SHORTCUT CALLBACK] Raccourci global déclenché!");
                     if let Some(window) = app.get_webview_window("main") {
                         eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_triggered");
@@ -298,7 +299,7 @@ fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
     eprintln!("[REGISTER] Tentative de désenregistrement du raccourci précédent");
 
     // S'assurer que le raccourci précédent est désenregistré
-    let unregister_result = app_handle.global_shortcut().unregister(shortcut.clone());
+    let unregister_result = app_handle.global_shortcut().unregister(shortcut);
     eprintln!(
         "[REGISTER] Résultat du désenregistrement: {:?}",
         unregister_result
@@ -345,10 +346,13 @@ fn speak(
 ) -> Result<(), String> {
     eprintln!("[SPEAK] Début de speak() avec texte: {}", text);
 
-    let detected_lang = detect_language(&text);
+    let cleaned_text = preprocess_text(&text);
+    eprintln!("[SPEAK] Texte nettoyé: {}", cleaned_text);
+
+    let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
 
-    let text_to_speak = translate_to_french_if_english(&text, detected_lang)?;
+    let text_to_speak = translate_to_french_if_english(&cleaned_text, detected_lang)?;
 
     let mut playback = state
         .lock()
@@ -451,10 +455,13 @@ fn speak_clipboard(
         text.chars().take(50).collect::<String>()
     );
 
-    let detected_lang = detect_language(&text);
+    let cleaned_text = preprocess_text(&text);
+    eprintln!("[SPEAK_CLIPBOARD] Texte nettoyé: {}", cleaned_text);
+
+    let detected_lang = detect_language(&cleaned_text);
     eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
 
-    let text_to_speak = translate_to_french_if_english(&text, detected_lang)?;
+    let text_to_speak = translate_to_french_if_english(&cleaned_text, detected_lang)?;
 
     let mut playback = state
         .lock()
