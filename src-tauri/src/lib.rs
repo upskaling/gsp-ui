@@ -8,15 +8,11 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tts::{TtsEngine, EspeakNg};
 
 struct PlaybackState {
     child_pid: Option<u32>,
-}
-
-struct ShortcutState {
-    registered: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -194,11 +190,6 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
         .build(app)?;
 
     Ok(())
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
 #[tauri::command]
@@ -392,7 +383,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             get_clipboard_content,
             load_shortcut_config,
             save_shortcut_config,

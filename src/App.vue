@@ -11,8 +11,6 @@ interface ClipboardShortcut {
   key: string;
 }
 
-const greetMsg = ref("");
-const name = ref("");
 const clipboardContent = ref("");
 const clipboardError = ref("");
 const showShortcutConfig = ref(false);
@@ -28,11 +26,6 @@ const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
 const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 let shortcutInProgress = false;
-
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
-}
 
 async function getClipboardContent(autoSpeak: boolean = false) {
   console.log("[getClipboardContent] Début, autoSpeak =", autoSpeak);
@@ -220,12 +213,6 @@ onUnmounted(() => {
 
 <template>
   <main class="container">
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-
     <div class="clipboard-section">
       <div class="clipboard-controls">
         <button @click="() => getClipboardContent(false)">
@@ -556,10 +543,6 @@ button:active {
 input,
 button {
   outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
 }
 
 @media (prefers-color-scheme: dark) {
