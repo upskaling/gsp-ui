@@ -12,12 +12,6 @@ interface ClipboardShortcut {
   key: string;
 }
 
-interface ShortcutBinding {
-  id: string;
-  current_binding: string;
-  default_binding: string;
-}
-
 const showConfig = ref(false);
 const shortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
@@ -380,42 +374,6 @@ function get_key_from_code(code: string): string {
   };
 
   return specialKeys[code] || code.toLowerCase();
-}
-
-/**
- * Afficher la combinaison complète de manière lisible
- * Exemple: "Ctrl + Shift + V"
- */
-function format_shortcut_display(shortcut: ClipboardShortcut): string {
-  const parts: string[] = [];
-  if (shortcut.ctrl) parts.push("Ctrl");
-  if (shortcut.shift) parts.push("Shift");
-  if (shortcut.alt) parts.push("Alt");
-  if (shortcut.meta) parts.push("Super");
-  parts.push(shortcut.key.toUpperCase());
-  return parts.join(" + ");
-}
-
-function format_binding(shortcut: ClipboardShortcut): string {
-  const parts: string[] = [];
-  // handy-keys accepte les touches en minuscules séparées par +
-  if (shortcut.ctrl) parts.push("ctrl");
-  if (shortcut.shift) parts.push("shift");
-  if (shortcut.alt) parts.push("alt");
-  if (shortcut.meta) parts.push("super"); // 'meta' = 'super' dans handy-keys
-
-  // La touche peut être une lettre ou un code spécial
-  let key = shortcut.key.toLowerCase();
-  // Corriger les noms de touches spéciales
-  key = key === "arrowup" ? "up" : key;
-  key = key === "arrowdown" ? "down" : key;
-  key = key === "arrowleft" ? "left" : key;
-  key = key === "arrowright" ? "right" : key;
-  key = key === " " ? "space" : key;
-  key = key === "enter" ? "return" : key;
-
-  parts.push(key);
-  return parts.join("+");
 }
 
 async function toggleRecordingKey(bindingId: string) {
