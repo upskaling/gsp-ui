@@ -4,11 +4,20 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tts::{TtsEngine, EspeakNg};
+
+struct PlaybackState {
+    child_pid: Option<u32>,
+}
+
+struct ShortcutState {
+    registered: bool,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct AppConfig {
@@ -105,31 +114,36 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
 }
 
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
+    eprintln!("[SETUP] Début de setup_global_shortcut()");
     let app_handle = app.handle().clone();
 
     if let Ok(config) = load_config() {
         let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
+        eprintln!("[SETUP] Raccourci à enregistrer: {}", shortcut_str);
 
         match shortcut_str.parse::<Shortcut>() {
             Ok(shortcut) => {
+                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci");
                 if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut.clone(), move |app, _accelerator, _state| {
-                    eprintln!("Raccourci global déclenché!");
+                    eprintln!("[SHORTCUT CALLBACK] Raccourci global déclenché!");
                     if let Some(window) = app.get_webview_window("main") {
+                        eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_triggered");
                         let _ = window.emit("global_shortcut_triggered", ());
                     }
                 }) {
-                    eprintln!("Erreur lors de l'enregistrement du raccourci: {:?}", e);
+                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci: {:?}", e);
                     return Err(format!("Erreur lors de l'enregistrement du raccourci: {:?}", e));
                 }
-                eprintln!("Raccourci global enregistré avec succès: {}", shortcut_str);
+                eprintln!("[SETUP] Raccourci global enregistré avec succès: {}", shortcut_str);
                 Ok(())
             }
             Err(e) => {
-                eprintln!("Erreur lors du parsing du raccourci {}: {:?}", shortcut_str, e);
+                eprintln!("[SETUP] Erreur lors du parsing du raccourci {}: {:?}", shortcut_str, e);
                 Err(format!("Erreur lors du parsing du raccourci: {:?}", e))
             }
         }
     } else {
+        eprintln!("[SETUP] Impossible de charger la configuration");
         Err("Impossible de charger la configuration".to_string())
     }
 }
@@ -234,22 +248,27 @@ fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
 
 #[tauri::command]
 fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("[REGISTER] Début de register_global_shortcut()");
     let config = load_config()?;
     let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
 
     let shortcut = shortcut_str.parse::<Shortcut>()
         .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
 
-    eprintln!("Enregistrement du raccourci global: {}", shortcut_str);
+    eprintln!("[REGISTER] Raccourci à enregistrer: {}", shortcut_str);
+    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci précédent");
 
     // S'assurer que le raccourci précédent est désenregistré
-    let _ = app_handle.global_shortcut().unregister(shortcut.clone());
+    let unregister_result = app_handle.global_shortcut().unregister(shortcut.clone());
+    eprintln!("[REGISTER] Résultat du désenregistrement: {:?}", unregister_result);
 
+    eprintln!("[REGISTER] Enregistrement du raccourci");
     app_handle
         .global_shortcut()
         .on_shortcut(shortcut, move |app, _accelerator, _state| {
-            eprintln!("Raccourci global déclenché!");
+            eprintln!("[REGISTER CALLBACK] Raccourci global déclenché!");
             if let Some(window) = app.get_webview_window("main") {
+                eprintln!("[REGISTER CALLBACK] Émission de global_shortcut_triggered");
                 let _ = window.emit("global_shortcut_triggered", ());
             }
         })
@@ -271,9 +290,56 @@ fn unregister_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn speak(text: String) -> Result<(), String> {
+fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("[SPEAK] Début de speak() avec texte: {}", text);
+
+    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+
+    if let Some(pid) = playback.child_pid.take() {
+        eprintln!("[SPEAK] Arrêt du processus précédent (PID: {})", pid);
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+
+    drop(playback);
+
+    eprintln!("[SPEAK] Création du TTS engine");
     let tts = EspeakNg::new();
-    tts.speak(&text);
+    eprintln!("[SPEAK] Appel de tts.speak()");
+    let mut child = tts.speak(&text)?;
+    let pid = child.id();
+    eprintln!("[SPEAK] Child lancé avec PID: {}", pid);
+
+    let app_handle_clone = app_handle.clone();
+    eprintln!("[SPEAK] Lancement du thread d'attente");
+    std::thread::spawn(move || {
+        eprintln!("[THREAD] Attente du processus PID: {}", pid);
+        let _ = child.wait();
+        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
+        if let Some(window) = app_handle_clone.get_webview_window("main") {
+            let _ = window.emit("playback_finished", ());
+        }
+    });
+
+    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    playback.child_pid = Some(pid);
+    eprintln!("[SPEAK] PID {} stocké dans state", pid);
+
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
+    eprintln!("[STOP_SPEAK] Début de stop_speak()");
+    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+
+    if let Some(pid) = playback.child_pid.take() {
+        eprintln!("[STOP_SPEAK] Arrêt du processus PID: {}", pid);
+        let kill_result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        eprintln!("[STOP_SPEAK] Résultat de kill: {}", kill_result);
+    } else {
+        eprintln!("[STOP_SPEAK] Aucun processus à arrêter");
+    }
+
     Ok(())
 }
 
@@ -283,6 +349,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(Mutex::new(PlaybackState { child_pid: None }))
         .setup(|app| {
             if let Err(e) = setup_tray(app) {
                 eprintln!("Erreur lors de la création de la tray-icon: {}", e);
@@ -307,7 +374,8 @@ pub fn run() {
             save_shortcut_config,
             register_global_shortcut,
             unregister_global_shortcut,
-            speak
+            speak,
+            stop_speak
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

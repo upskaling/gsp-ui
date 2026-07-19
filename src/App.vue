@@ -25,6 +25,7 @@ const shortcutConfig = ref<ClipboardShortcut>({
 });
 const recordingKey = ref(false);
 const isSpeaking = ref(false);
+let shortcutInProgress = false;
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -32,20 +33,26 @@ async function greet() {
 }
 
 async function getClipboardContent(autoSpeak: boolean = false) {
+  console.log("[getClipboardContent] Début, autoSpeak =", autoSpeak);
   try {
     clipboardError.value = "";
     clipboardContent.value = await invoke("get_clipboard_content");
+    console.log("[getClipboardContent] Contenu récupéré:", clipboardContent.value?.substring(0, 50));
     if (autoSpeak && clipboardContent.value) {
+      console.log("[getClipboardContent] Appel de speakSelection()");
       await speakSelection();
     }
   } catch (error) {
+    console.log("[getClipboardContent] Erreur:", error);
     clipboardError.value = `Erreur: ${error}`;
     clipboardContent.value = "";
   }
 }
 
 async function speakSelection() {
+  console.log("[speakSelection] Début");
   if (!clipboardContent.value) {
+    console.log("[speakSelection] Pas de contenu");
     clipboardError.value = "Aucun contenu à lire";
     return;
   }
@@ -53,10 +60,26 @@ async function speakSelection() {
   try {
     isSpeaking.value = true;
     clipboardError.value = "";
+    console.log("[speakSelection] Appel de invoke('speak')");
     await invoke("speak", { text: clipboardContent.value });
+    console.log("[speakSelection] speak() terminé");
   } catch (error) {
+    console.log("[speakSelection] Erreur:", error);
     clipboardError.value = `Erreur lors de la lecture: ${error}`;
+    isSpeaking.value = false;
+  }
+}
+
+async function stopSpeaking() {
+  console.log("[stopSpeaking] Début");
+  try {
+    console.log("[stopSpeaking] Appel de invoke('stop_speak')");
+    await invoke("stop_speak");
+    console.log("[stopSpeaking] stop_speak() terminé");
+  } catch (error) {
+    console.error(`[stopSpeaking] Erreur lors de l'arrêt de la lecture: ${error}`);
   } finally {
+    console.log("[stopSpeaking] Mise à jour de isSpeaking à false");
     isSpeaking.value = false;
   }
 }
@@ -96,19 +119,26 @@ async function loadShortcutConfig() {
 }
 
 async function saveShortcutConfig() {
+  console.log("[saveShortcutConfig] Début de saveShortcutConfig()");
   try {
+    console.log("[saveShortcutConfig] Sauvegarde de la config");
     await invoke("save_shortcut_config", { shortcut: shortcutConfig.value });
 
     // Réenregistrer le raccourci global avec la nouvelle configuration
     try {
+      console.log("[saveShortcutConfig] Désenregistrement du raccourci");
       await invoke("unregister_global_shortcut");
     } catch {
       // Ignorer si le désenregistrement échoue (raccourci peut ne pas être enregistré)
+      console.log("[saveShortcutConfig] Désenregistrement échoué (ignoré)");
     }
 
+    console.log("[saveShortcutConfig] Enregistrement du nouveau raccourci");
     await invoke("register_global_shortcut");
     showShortcutConfig.value = false;
+    console.log("[saveShortcutConfig] Terminé");
   } catch (error) {
+    console.log("[saveShortcutConfig] Erreur:", error);
     alert(`Erreur lors de la sauvegarde: ${error}`);
   }
 }
@@ -117,15 +147,46 @@ onMounted(async () => {
   await loadShortcutConfig();
   window.addEventListener("keydown", handleKeydown);
 
+  // Écouter quand la lecture se termine
+  try {
+    await listen("playback_finished", () => {
+      console.log("[Playback] Événement playback_finished reçu, mise à jour de isSpeaking à false");
+      isSpeaking.value = false;
+    });
+    console.log("[Playback] Listener playback_finished configuré");
+  } catch (error) {
+    console.error("[Playback] Erreur lors de la configuration du listener playback_finished:", error);
+  }
+
   // Écouter l'événement du raccourci global
   try {
-    await listen("global_shortcut_triggered", () => {
-      console.log("Événement du raccourci global reçu!");
-      getClipboardContent(true);
+    await listen("global_shortcut_triggered", async () => {
+      console.log("[Global Shortcut] Raccourci global reçu! isSpeaking =", isSpeaking.value);
+
+      // Ignorer les appels en double si un traitement est en cours
+      if (shortcutInProgress) {
+        console.log("[Global Shortcut] Appel ignoré (déjà en cours)");
+        return;
+      }
+
+      shortcutInProgress = true;
+
+      if (isSpeaking.value) {
+        console.log("[Global Shortcut] Appel de stopSpeaking()");
+        await stopSpeaking();
+      } else {
+        console.log("[Global Shortcut] Appel de getClipboardContent()");
+        await getClipboardContent(true);
+      }
+
+      // Attendre avant de réinitialiser le flag pour éviter les appels en double
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      shortcutInProgress = false;
+      console.log("[Global Shortcut] Flag réinitialisé");
     });
-    console.log("Listener du raccourci global configuré");
+    console.log("[Global Shortcut] Listener du raccourci global configuré");
   } catch (error) {
-    console.error("Erreur lors de la configuration du listener:", error);
+    console.error("[Global Shortcut] Erreur lors de la configuration du listener:", error);
   }
 });
 
@@ -144,7 +205,7 @@ onUnmounted(() => {
 
     <div class="clipboard-section">
       <div class="clipboard-controls">
-        <button @click="getClipboardContent">
+        <button @click="() => getClipboardContent(false)">
           Afficher le contenu du presse-papier
           <span class="shortcut-hint">
             ({{ shortcutConfig.ctrl ? "Ctrl+" : "" }}{{ shortcutConfig.alt ? "Alt+" : "" }}{{ shortcutConfig.meta ? "Super+" : "" }}{{ shortcutConfig.shift ? "Shift+" : "" }}{{ shortcutConfig.key.toUpperCase() }})
