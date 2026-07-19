@@ -52,6 +52,21 @@ async function speakSelection() {
   }
 }
 
+async function speakOCR() {
+  console.log("[speakOCR] Début");
+
+  try {
+    isSpeaking.value = true;
+    console.log("[speakOCR] Appel de invoke('speak_ocr')");
+    await invoke("speak_ocr");
+    console.log("[speakOCR] speak_ocr() terminé");
+  } catch (error) {
+    console.log("[speakOCR] Erreur:", error);
+    alert(`Erreur OCR: ${error}`);
+    isSpeaking.value = false;
+  }
+}
+
 async function stopSpeaking() {
   console.log("[stopSpeaking] Début");
   try {
@@ -267,6 +282,11 @@ onUnmounted(() => {
         <button @click="speakSelection" :disabled="isSpeaking" class="speak-btn">
           {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
         </button>
+        <button @click="speakOCR" :disabled="isSpeaking" class="speak-ocr-btn">
+          {{ isSpeaking ? "📸 Capture en cours..." : "📸 Lecture OCR" }}
+        </button>
+      </div>
+      <div class="clipboard-controls">
         <div class="speed-controls">
           <label for="speed-select">Vitesse:</label>
           <select

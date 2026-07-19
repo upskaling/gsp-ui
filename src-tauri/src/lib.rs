@@ -1,10 +1,14 @@
 mod language_detector;
+mod ocr;
+mod screenshooter;
 mod textutils;
 mod translator;
 mod tts;
 
 use language_detector::{detect_language, DetectedLanguage};
+use ocr::tesseract;
 use serde::{Deserialize, Serialize};
+use screenshooter::xfce4_screenshooter_region;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::image::Image;
@@ -467,6 +471,128 @@ fn speak(
 }
 
 #[tauri::command]
+fn speak_ocr(
+    state: State<Mutex<PlaybackState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    use std::fs;
+    use std::time::SystemTime;
+
+    eprintln!("[SPEAK_OCR] Début de speak_ocr()");
+
+    let temp_dir = std::env::temp_dir();
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|e| format!("Erreur lors de la récupération du timestamp: {}", e))?
+        .as_millis();
+
+    let screenshot_path = temp_dir.join(format!("gsp-ui-screenshot-{}.png", timestamp));
+    let screenshot_path_str = screenshot_path
+        .to_str()
+        .ok_or_else(|| "Impossible de convertir le chemin en string".to_string())?;
+
+    eprintln!("[SPEAK_OCR] Chemin de capture: {}", screenshot_path_str);
+    eprintln!("[SPEAK_OCR] Lancement de xfce4-screenshooter");
+
+    xfce4_screenshooter_region(screenshot_path_str);
+
+    eprintln!("[SPEAK_OCR] Attente de la création du fichier");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    if !screenshot_path.exists() {
+        eprintln!("[SPEAK_OCR] Erreur: le fichier de capture n'a pas été créé");
+        return Err("La capture d'écran a échoué".to_string());
+    }
+
+    eprintln!("[SPEAK_OCR] Fichier de capture créé");
+
+    let config = load_config().ok();
+    let source_lang = config.as_ref().map(|c| c.source_language.as_str()).unwrap_or("auto");
+
+    let tesseract_lang = match source_lang {
+        "auto" | "en" => "en-GB",
+        "fr" => "fr-FR",
+        "de" => "de-DE",
+        "es" => "es-ES",
+        "it" => "it-IT",
+        _ => "en-GB",
+    };
+
+    eprintln!("[SPEAK_OCR] Exécution de Tesseract avec la langue: {}", tesseract_lang);
+    let text = tesseract(screenshot_path_str, tesseract_lang);
+
+    if text.is_empty() {
+        eprintln!("[SPEAK_OCR] Erreur: Tesseract n'a pas reconnu de texte");
+        let _ = fs::remove_file(&screenshot_path);
+        return Err("Aucun texte reconnu par OCR".to_string());
+    }
+
+    eprintln!(
+        "[SPEAK_OCR] Texte reconnu: {}",
+        text.chars().take(50).collect::<String>()
+    );
+
+    let _ = fs::remove_file(&screenshot_path);
+
+    let cleaned_text = preprocess_text(&text);
+    eprintln!("[SPEAK_OCR] Texte nettoyé: {}", cleaned_text);
+
+    let detected_lang = detect_language(&cleaned_text);
+    eprintln!("[SPEAK_OCR] Langue détectée: {:?}", detected_lang);
+
+    let target_lang = config.as_ref().map(|c| c.target_language.as_str()).unwrap_or("fr");
+    let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+
+    let text_to_speak = translate_if_needed(&cleaned_text, detected_lang, source_lang, target_lang)?;
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+
+    if let Some(pid) = playback.child_pid.take() {
+        eprintln!("[SPEAK_OCR] Arrêt du processus précédent (PID: {})", pid);
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+
+    drop(playback);
+
+    eprintln!("[SPEAK_OCR] Création du TTS engine");
+    let mut tts = EspeakNg::new();
+    tts.set_lang(target_lang.to_string());
+
+    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
+    tts.set_speed(espeak_speed);
+
+    eprintln!(
+        "[SPEAK_OCR] Vitesse de lecture: {} (espeak: {})",
+        playback_speed, espeak_speed
+    );
+    eprintln!("[SPEAK_OCR] Appel de tts.speak()");
+    let mut child = tts.speak(&text_to_speak)?;
+    let pid = child.id();
+    eprintln!("[SPEAK_OCR] Child lancé avec PID: {}", pid);
+
+    let app_handle_clone = app_handle.clone();
+    eprintln!("[SPEAK_OCR] Lancement du thread d'attente");
+    std::thread::spawn(move || {
+        eprintln!("[THREAD] Attente du processus PID: {}", pid);
+        let _ = child.wait();
+        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
+        if let Some(window) = app_handle_clone.get_webview_window("main") {
+            let _ = window.emit("playback_finished", ());
+        }
+    });
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    playback.child_pid = Some(pid);
+    eprintln!("[SPEAK_OCR] PID {} stocké dans state", pid);
+
+    Ok(())
+}
+
+#[tauri::command]
 fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     eprintln!("[STOP_SPEAK] Début de stop_speak()");
     let mut playback = state
@@ -617,7 +743,8 @@ pub fn run() {
             save_target_language,
             speak,
             stop_speak,
-            speak_clipboard
+            speak_clipboard,
+            speak_ocr
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
