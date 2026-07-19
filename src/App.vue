@@ -25,6 +25,8 @@ const shortcutConfig = ref<ClipboardShortcut>({
 });
 const recordingKey = ref(false);
 const isSpeaking = ref(false);
+const playbackSpeed = ref(1.0);
+const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 let shortcutInProgress = false;
 
 async function greet() {
@@ -118,6 +120,26 @@ async function loadShortcutConfig() {
   }
 }
 
+async function loadPlaybackSpeed() {
+  try {
+    playbackSpeed.value = await invoke("load_playback_speed");
+    console.log("[loadPlaybackSpeed] Vitesse chargée:", playbackSpeed.value);
+  } catch (error) {
+    console.error("Erreur lors du chargement de la vitesse:", error);
+  }
+}
+
+async function setPlaybackSpeed(speed: number) {
+  console.log("[setPlaybackSpeed] Nouvelle vitesse:", speed);
+  playbackSpeed.value = speed;
+  try {
+    await invoke("save_playback_speed", { speed });
+    console.log("[setPlaybackSpeed] Vitesse sauvegardée");
+  } catch (error) {
+    console.error("Erreur lors de la sauvegarde de la vitesse:", error);
+  }
+}
+
 async function saveShortcutConfig() {
   console.log("[saveShortcutConfig] Début de saveShortcutConfig()");
   try {
@@ -145,6 +167,7 @@ async function saveShortcutConfig() {
 
 onMounted(async () => {
   await loadShortcutConfig();
+  await loadPlaybackSpeed();
   window.addEventListener("keydown", handleKeydown);
 
   // Écouter quand la lecture se termine
@@ -214,6 +237,20 @@ onUnmounted(() => {
         <button @click="speakSelection" :disabled="isSpeaking || !clipboardContent" class="speak-btn">
           {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
         </button>
+        <div class="speed-controls">
+          <label for="speed-select">Vitesse:</label>
+          <select
+            id="speed-select"
+            v-model.number="playbackSpeed"
+            @change="setPlaybackSpeed(playbackSpeed)"
+            :disabled="isSpeaking"
+            class="speed-select"
+          >
+            <option v-for="speed in speedOptions" :key="speed" :value="speed">
+              {{ speed }}x
+            </option>
+          </select>
+        </div>
         <button @click="showShortcutConfig = !showShortcutConfig" class="config-btn">
           ⚙️ Configurer
         </button>
@@ -402,6 +439,37 @@ onUnmounted(() => {
   background-color: #5a6268;
   border-color: #5a6268;
 }
+
+.speed-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.speed-controls label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.speed-select {
+  padding: 0.5em 0.8em;
+  font-size: 1em;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+
+.speed-select:hover {
+  border-color: #396cd8;
+}
+
+.speed-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>
 <style>
 :root {
@@ -557,6 +625,16 @@ button {
 
   .cancel-btn:hover {
     background-color: #5a6268;
+  }
+
+  .speed-select {
+    border-color: #555;
+    background-color: #0f0f0f98;
+    color: #f6f6f6;
+  }
+
+  .speed-select:hover {
+    border-color: #24c8db;
   }
 }
 

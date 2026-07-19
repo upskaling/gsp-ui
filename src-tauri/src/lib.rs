@@ -23,6 +23,8 @@ struct ShortcutState {
 struct AppConfig {
     #[serde(default)]
     clipboard_shortcut: ClipboardShortcut,
+    #[serde(default)]
+    playback_speed: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -61,6 +63,7 @@ impl Default for AppConfig {
                 meta: false,
                 key: "c".to_string(),
             },
+            playback_speed: 1.0,
         }
     }
 }
@@ -228,6 +231,18 @@ fn save_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
     save_config(&config)
 }
 
+#[tauri::command]
+fn load_playback_speed() -> Result<f32, String> {
+    load_config().map(|cfg| cfg.playback_speed)
+}
+
+#[tauri::command]
+fn save_playback_speed(speed: f32) -> Result<(), String> {
+    let mut config = load_config()?;
+    config.playback_speed = speed.clamp(0.5, 2.0);
+    save_config(&config)
+}
+
 fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
     let mut keys = vec![];
     if shortcut.ctrl {
@@ -303,7 +318,16 @@ fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle
     drop(playback);
 
     eprintln!("[SPEAK] Création du TTS engine");
-    let tts = EspeakNg::new();
+    let mut tts = EspeakNg::new();
+
+    // Charger la vitesse sauvegardée
+    let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
+
+    // Convertir le multiplicateur (1.0-2.0) en valeur eSpeak (50-200)
+    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
+    tts.set_speed(espeak_speed);
+
+    eprintln!("[SPEAK] Vitesse de lecture: {} (espeak: {})", playback_speed, espeak_speed);
     eprintln!("[SPEAK] Appel de tts.speak()");
     let mut child = tts.speak(&text)?;
     let pid = child.id();
@@ -374,6 +398,8 @@ pub fn run() {
             save_shortcut_config,
             register_global_shortcut,
             unregister_global_shortcut,
+            load_playback_speed,
+            save_playback_speed,
             speak,
             stop_speak
         ])
