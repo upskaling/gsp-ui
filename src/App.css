@@ -65,6 +65,19 @@
   cursor: not-allowed;
 }
 
+.stop-btn {
+  font-size: 0.9em;
+  padding: 0.5em 1em;
+  background-color: #dc3545;
+  color: white;
+  border-color: #dc3545;
+}
+
+.stop-btn:hover {
+  background-color: #c82333;
+  border-color: #c82333;
+}
+
 .shortcut-config {
   margin-top: 1rem;
   padding: 1rem;
@@ -467,6 +480,14 @@ button {
 
   .cancel-btn:hover {
     background-color: #5a6268;
+  }
+
+  .stop-btn {
+    background-color: #dc3545;
+  }
+
+  .stop-btn:hover {
+    background-color: #c82333;
   }
 
   .speed-select {

@@ -576,6 +576,9 @@ onUnmounted(() => {
         <button @click="speakOCR" :disabled="isSpeaking" class="speak-ocr-btn">
           {{ isSpeaking ? "📸 Capture en cours..." : "📸 Lecture OCR" }}
         </button>
+        <button v-if="isSpeaking" @click="stopSpeaking" class="stop-btn">
+          ⏹️ Arrêter
+        </button>
         </div>
       </div>
       <div class="clipboard-controls">
