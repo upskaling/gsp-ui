@@ -193,24 +193,6 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
 }
 
 #[tauri::command]
-fn get_clipboard_content() -> Result<String, String> {
-    use x11_clipboard::Clipboard;
-
-    let clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
-
-    let atoms = clipboard.getter.atoms.clone();
-    let timeout = std::time::Duration::from_secs(1);
-
-    clipboard
-        .load(clipboard.setter.atoms.primary, atoms.utf8_string, atoms.property, timeout)
-        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
-        .and_then(|data| {
-            String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
-        })
-}
-
-#[tauri::command]
 fn load_shortcut_config() -> Result<ClipboardShortcut, String> {
     load_config().map(|cfg| cfg.clipboard_shortcut)
 }
@@ -358,6 +340,68 @@ fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn speak_clipboard(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+    use x11_clipboard::Clipboard;
+
+    eprintln!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
+
+    let clipboard =
+        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
+
+    let atoms = clipboard.getter.atoms.clone();
+    let timeout = std::time::Duration::from_secs(1);
+
+    let text = clipboard
+        .load(clipboard.setter.atoms.primary, atoms.utf8_string, atoms.property, timeout)
+        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
+        .and_then(|data| {
+            String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
+        })?;
+
+    eprintln!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
+
+    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+
+    if let Some(pid) = playback.child_pid.take() {
+        eprintln!("[SPEAK_CLIPBOARD] Arrêt du processus précédent (PID: {})", pid);
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+
+    drop(playback);
+
+    eprintln!("[SPEAK_CLIPBOARD] Création du TTS engine");
+    let mut tts = EspeakNg::new();
+
+    let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
+
+    let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
+    tts.set_speed(espeak_speed);
+
+    eprintln!("[SPEAK_CLIPBOARD] Vitesse de lecture: {} (espeak: {})", playback_speed, espeak_speed);
+    eprintln!("[SPEAK_CLIPBOARD] Appel de tts.speak()");
+    let mut child = tts.speak(&text)?;
+    let pid = child.id();
+    eprintln!("[SPEAK_CLIPBOARD] Child lancé avec PID: {}", pid);
+
+    let app_handle_clone = app_handle.clone();
+    eprintln!("[SPEAK_CLIPBOARD] Lancement du thread d'attente");
+    std::thread::spawn(move || {
+        eprintln!("[THREAD] Attente du processus PID: {}", pid);
+        let _ = child.wait();
+        eprintln!("[THREAD] Processus terminé, émission de playback_finished");
+        if let Some(window) = app_handle_clone.get_webview_window("main") {
+            let _ = window.emit("playback_finished", ());
+        }
+    });
+
+    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    playback.child_pid = Some(pid);
+    eprintln!("[SPEAK_CLIPBOARD] PID {} stocké dans state", pid);
+
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -383,7 +427,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            get_clipboard_content,
             load_shortcut_config,
             save_shortcut_config,
             register_global_shortcut,
@@ -391,7 +434,8 @@ pub fn run() {
             load_playback_speed,
             save_playback_speed,
             speak,
-            stop_speak
+            stop_speak,
+            speak_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

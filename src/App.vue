@@ -11,8 +11,6 @@ interface ClipboardShortcut {
   key: string;
 }
 
-const clipboardContent = ref("");
-const clipboardError = ref("");
 const showShortcutConfig = ref(false);
 const shortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
@@ -27,40 +25,16 @@ const playbackSpeed = ref(1.0);
 const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 let shortcutInProgress = false;
 
-async function getClipboardContent(autoSpeak: boolean = false) {
-  console.log("[getClipboardContent] Début, autoSpeak =", autoSpeak);
-  try {
-    clipboardError.value = "";
-    clipboardContent.value = await invoke("get_clipboard_content");
-    console.log("[getClipboardContent] Contenu récupéré:", clipboardContent.value?.substring(0, 50));
-    if (autoSpeak && clipboardContent.value) {
-      console.log("[getClipboardContent] Appel de speakSelection()");
-      await speakSelection();
-    }
-  } catch (error) {
-    console.log("[getClipboardContent] Erreur:", error);
-    clipboardError.value = `Erreur: ${error}`;
-    clipboardContent.value = "";
-  }
-}
-
 async function speakSelection() {
   console.log("[speakSelection] Début");
-  if (!clipboardContent.value) {
-    console.log("[speakSelection] Pas de contenu");
-    clipboardError.value = "Aucun contenu à lire";
-    return;
-  }
 
   try {
     isSpeaking.value = true;
-    clipboardError.value = "";
-    console.log("[speakSelection] Appel de invoke('speak')");
-    await invoke("speak", { text: clipboardContent.value });
-    console.log("[speakSelection] speak() terminé");
+    console.log("[speakSelection] Appel de invoke('speak_clipboard')");
+    await invoke("speak_clipboard");
+    console.log("[speakSelection] speak_clipboard() terminé");
   } catch (error) {
     console.log("[speakSelection] Erreur:", error);
-    clipboardError.value = `Erreur lors de la lecture: ${error}`;
     isSpeaking.value = false;
   }
 }
@@ -191,8 +165,8 @@ onMounted(async () => {
         console.log("[Global Shortcut] Appel de stopSpeaking()");
         await stopSpeaking();
       } else {
-        console.log("[Global Shortcut] Appel de getClipboardContent()");
-        await getClipboardContent(true);
+        console.log("[Global Shortcut] Appel de speakSelection()");
+        await speakSelection();
       }
 
       // Attendre avant de réinitialiser le flag pour éviter les appels en double
@@ -215,13 +189,7 @@ onUnmounted(() => {
   <main class="container">
     <div class="clipboard-section">
       <div class="clipboard-controls">
-        <button @click="() => getClipboardContent(false)">
-          Afficher le contenu du presse-papier
-          <span class="shortcut-hint">
-            ({{ shortcutConfig.ctrl ? "Ctrl+" : "" }}{{ shortcutConfig.alt ? "Alt+" : "" }}{{ shortcutConfig.meta ? "Super+" : "" }}{{ shortcutConfig.shift ? "Shift+" : "" }}{{ shortcutConfig.key.toUpperCase() }})
-          </span>
-        </button>
-        <button @click="speakSelection" :disabled="isSpeaking || !clipboardContent" class="speak-btn">
+        <button @click="speakSelection" :disabled="isSpeaking" class="speak-btn">
           {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
         </button>
         <div class="speed-controls">
@@ -274,11 +242,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="clipboardError" class="clipboard-error">{{ clipboardError }}</div>
-      <div v-if="clipboardContent" class="clipboard-display">
-        <strong>Contenu du presse-papier:</strong>
-        <p>{{ clipboardContent }}</p>
-      </div>
     </div>
   </main>
 </template>
@@ -300,25 +263,6 @@ onUnmounted(() => {
   background-color: #f9f9f9;
 }
 
-.clipboard-display {
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: #ffffff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-  word-break: break-word;
-}
-
-.clipboard-error {
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: #fee;
-  color: #c33;
-  border: 1px solid #fcc;
-  border-radius: 4px;
-}
 
 .shortcut-hint {
   display: block;
@@ -569,16 +513,6 @@ button {
     background-color: #1f1f1f;
   }
 
-  .clipboard-display {
-    background-color: #2a2a2a;
-    border-color: #444;
-  }
-
-  .clipboard-error {
-    background-color: #3a1a1a;
-    color: #ff6b6b;
-    border-color: #662222;
-  }
 
   .shortcut-hint {
     color: #aaa;
