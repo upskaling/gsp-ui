@@ -1,16 +1,18 @@
-mod tts;
+mod language_detector;
 mod textutils;
+mod tts;
 
+use language_detector::detect_language;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use tts::{TtsEngine, EspeakNg};
+use tts::{EspeakNg, TtsEngine};
 
 struct PlaybackState {
     child_pid: Option<u32>,
@@ -137,11 +139,17 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
                     eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci: {:?}", e);
                     return Err(format!("Erreur lors de l'enregistrement du raccourci: {:?}", e));
                 }
-                eprintln!("[SETUP] Raccourci global enregistré avec succès: {}", shortcut_str);
+                eprintln!(
+                    "[SETUP] Raccourci global enregistré avec succès: {}",
+                    shortcut_str
+                );
                 Ok(())
             }
             Err(e) => {
-                eprintln!("[SETUP] Erreur lors du parsing du raccourci {}: {:?}", shortcut_str, e);
+                eprintln!(
+                    "[SETUP] Erreur lors du parsing du raccourci {}: {:?}",
+                    shortcut_str, e
+                );
                 Err(format!("Erreur lors du parsing du raccourci: {:?}", e))
             }
         }
@@ -256,7 +264,8 @@ fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
     let config = load_config()?;
     let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
 
-    let shortcut = shortcut_str.parse::<Shortcut>()
+    let shortcut = shortcut_str
+        .parse::<Shortcut>()
         .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
 
     eprintln!("[REGISTER] Raccourci à enregistrer: {}", shortcut_str);
@@ -264,7 +273,10 @@ fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
 
     // S'assurer que le raccourci précédent est désenregistré
     let unregister_result = app_handle.global_shortcut().unregister(shortcut.clone());
-    eprintln!("[REGISTER] Résultat du désenregistrement: {:?}", unregister_result);
+    eprintln!(
+        "[REGISTER] Résultat du désenregistrement: {:?}",
+        unregister_result
+    );
 
     eprintln!("[REGISTER] Enregistrement du raccourci");
     app_handle
@@ -276,7 +288,12 @@ fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
                 let _ = window.emit("global_shortcut_triggered", ());
             }
         })
-        .map_err(|e| format!("Erreur lors de l'enregistrement du raccourci {}: {:?}", shortcut_str, e))
+        .map_err(|e| {
+            format!(
+                "Erreur lors de l'enregistrement du raccourci {}: {:?}",
+                shortcut_str, e
+            )
+        })
 }
 
 #[tauri::command]
@@ -284,7 +301,8 @@ fn unregister_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
     let config = load_config()?;
     let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
 
-    let shortcut = shortcut_str.parse::<Shortcut>()
+    let shortcut = shortcut_str
+        .parse::<Shortcut>()
         .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
 
     app_handle
@@ -294,10 +312,19 @@ fn unregister_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+fn speak(
+    text: String,
+    state: State<Mutex<PlaybackState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     eprintln!("[SPEAK] Début de speak() avec texte: {}", text);
 
-    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let detected_lang = detect_language(&text);
+    eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
 
     if let Some(pid) = playback.child_pid.take() {
         eprintln!("[SPEAK] Arrêt du processus précédent (PID: {})", pid);
@@ -308,6 +335,7 @@ fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle
 
     eprintln!("[SPEAK] Création du TTS engine");
     let mut tts = EspeakNg::new();
+    tts.set_lang(detected_lang.as_espeak_code().to_string());
 
     // Charger la vitesse sauvegardée
     let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
@@ -316,7 +344,10 @@ fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle
     let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
     tts.set_speed(espeak_speed);
 
-    eprintln!("[SPEAK] Vitesse de lecture: {} (espeak: {})", playback_speed, espeak_speed);
+    eprintln!(
+        "[SPEAK] Vitesse de lecture: {} (espeak: {})",
+        playback_speed, espeak_speed
+    );
     eprintln!("[SPEAK] Appel de tts.speak()");
     let mut child = tts.speak(&text)?;
     let pid = child.id();
@@ -333,7 +364,9 @@ fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle
         }
     });
 
-    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
     playback.child_pid = Some(pid);
     eprintln!("[SPEAK] PID {} stocké dans state", pid);
 
@@ -343,7 +376,9 @@ fn speak(text: String, state: State<Mutex<PlaybackState>>, app_handle: AppHandle
 #[tauri::command]
 fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     eprintln!("[STOP_SPEAK] Début de stop_speak()");
-    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
 
     if let Some(pid) = playback.child_pid.take() {
         eprintln!("[STOP_SPEAK] Arrêt du processus PID: {}", pid);
@@ -357,7 +392,10 @@ fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn speak_clipboard(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+fn speak_clipboard(
+    state: State<Mutex<PlaybackState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     use x11_clipboard::Clipboard;
 
     eprintln!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
@@ -369,18 +407,34 @@ fn speak_clipboard(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) ->
     let timeout = std::time::Duration::from_secs(1);
 
     let text = clipboard
-        .load(clipboard.setter.atoms.primary, atoms.utf8_string, atoms.property, timeout)
+        .load(
+            clipboard.setter.atoms.primary,
+            atoms.utf8_string,
+            atoms.property,
+            timeout,
+        )
         .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
         .and_then(|data| {
             String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
         })?;
 
-    eprintln!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
+    eprintln!(
+        "[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}",
+        text.chars().take(50).collect::<String>()
+    );
 
-    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let detected_lang = detect_language(&text);
+    eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
+
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
 
     if let Some(pid) = playback.child_pid.take() {
-        eprintln!("[SPEAK_CLIPBOARD] Arrêt du processus précédent (PID: {})", pid);
+        eprintln!(
+            "[SPEAK_CLIPBOARD] Arrêt du processus précédent (PID: {})",
+            pid
+        );
         let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
     }
 
@@ -388,13 +442,17 @@ fn speak_clipboard(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) ->
 
     eprintln!("[SPEAK_CLIPBOARD] Création du TTS engine");
     let mut tts = EspeakNg::new();
+    tts.set_lang(detected_lang.as_espeak_code().to_string());
 
     let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
 
     let espeak_speed = ((playback_speed * 100.0) as i32).clamp(50, 200);
     tts.set_speed(espeak_speed);
 
-    eprintln!("[SPEAK_CLIPBOARD] Vitesse de lecture: {} (espeak: {})", playback_speed, espeak_speed);
+    eprintln!(
+        "[SPEAK_CLIPBOARD] Vitesse de lecture: {} (espeak: {})",
+        playback_speed, espeak_speed
+    );
     eprintln!("[SPEAK_CLIPBOARD] Appel de tts.speak()");
     let mut child = tts.speak(&text)?;
     let pid = child.id();
@@ -411,13 +469,14 @@ fn speak_clipboard(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) ->
         }
     });
 
-    let mut playback = state.lock().map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let mut playback = state
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
     playback.child_pid = Some(pid);
     eprintln!("[SPEAK_CLIPBOARD] PID {} stocké dans state", pid);
 
     Ok(())
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

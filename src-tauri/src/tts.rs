@@ -2,8 +2,8 @@
 //!
 //! Implémentation du trait TtsEngine pour eSpeak-NG.
 
-use std::process::{Command, Child};
-use crate::textutils::{trim_whitespace, remove_special_characters, read_vars};
+use crate::textutils::{read_vars, remove_special_characters, trim_whitespace};
+use std::process::{Child, Command};
 
 /// Trait pour les moteurs de synthèse vocale
 pub trait TtsEngine {
@@ -55,9 +55,15 @@ impl TtsEngine for EspeakNg {
         let preprocessed_text = preprocess_text(text.to_string());
         let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
 
+        let voice = if self.lang == "en" {
+            "mb-EN1"
+        } else {
+            "mb-FR4"
+        };
+
         let result = Command::new("espeak-ng")
             .arg("-v")
-            .arg(format!("mb-{}{}", self.lang[..2].to_uppercase(), "4"))
+            .arg(voice)
             .arg("-s")
             .arg(speed.to_string())
             .arg("-p")
@@ -73,7 +79,10 @@ impl TtsEngine for EspeakNg {
         match result {
             Ok(output) => {
                 if !output.status.success() {
-                    return Err(format!("Erreur espeak-ng: {}", String::from_utf8_lossy(&output.stderr)));
+                    return Err(format!(
+                        "Erreur espeak-ng: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
                 }
 
                 eprintln!("Audio généré: {}", self.output_file);
@@ -84,9 +93,7 @@ impl TtsEngine for EspeakNg {
 
                 Ok(child)
             }
-            Err(e) => {
-                Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e))
-            }
+            Err(e) => Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e)),
         }
     }
 
