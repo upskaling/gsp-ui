@@ -30,6 +30,8 @@ struct AppConfig {
     #[serde(default)]
     clipboard_shortcut: ClipboardShortcut,
     #[serde(default)]
+    ocr_shortcut: ClipboardShortcut,
+    #[serde(default)]
     playback_speed: f32,
     #[serde(default)]
     dev_mode: bool,
@@ -74,6 +76,13 @@ impl Default for AppConfig {
                 alt: false,
                 meta: false,
                 key: "c".to_string(),
+            },
+            ocr_shortcut: ClipboardShortcut {
+                ctrl: true,
+                shift: false,
+                alt: true,
+                meta: false,
+                key: "o".to_string(),
             },
             playback_speed: 1.0,
             dev_mode: false,
@@ -136,34 +145,66 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
     let app_handle = app.handle().clone();
 
     if let Ok(config) = load_config() {
+        // Enregistrer le raccourci clipboard
         let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-        eprintln!("[SETUP] Raccourci à enregistrer: {}", shortcut_str);
+        eprintln!("[SETUP] Raccourci clipboard à enregistrer: {}", shortcut_str);
 
         match shortcut_str.parse::<Shortcut>() {
             Ok(shortcut) => {
-                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci");
+                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci clipboard");
                 if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut, move |app, _accelerator, _state| {
-                    eprintln!("[SHORTCUT CALLBACK] Raccourci global déclenché!");
+                    eprintln!("[SHORTCUT CALLBACK] Raccourci clipboard déclenché!");
                     if let Some(window) = app.get_webview_window("main") {
                         eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_triggered");
                         let _ = window.emit("global_shortcut_triggered", ());
                     }
                 }) {
-                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci: {:?}", e);
-                    return Err(format!("Erreur lors de l'enregistrement du raccourci: {:?}", e));
+                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci clipboard: {:?}", e);
+                    return Err(format!("Erreur lors de l'enregistrement du raccourci clipboard: {:?}", e));
                 }
                 eprintln!(
-                    "[SETUP] Raccourci global enregistré avec succès: {}",
+                    "[SETUP] Raccourci clipboard enregistré avec succès: {}",
                     shortcut_str
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[SETUP] Erreur lors du parsing du raccourci clipboard {}: {:?}",
+                    shortcut_str, e
+                );
+                return Err(format!("Erreur lors du parsing du raccourci clipboard: {:?}", e));
+            }
+        }
+
+        // Enregistrer le raccourci OCR
+        let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
+        eprintln!("[SETUP] Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
+
+        match ocr_shortcut_str.parse::<Shortcut>() {
+            Ok(shortcut) => {
+                eprintln!("[SETUP] Parsing réussi, enregistrement du raccourci OCR");
+                if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut, move |app, _accelerator, _state| {
+                    eprintln!("[SHORTCUT CALLBACK] Raccourci OCR déclenché!");
+                    if let Some(window) = app.get_webview_window("main") {
+                        eprintln!("[SHORTCUT CALLBACK] Fenêtre trouvée, émission de global_shortcut_ocr_triggered");
+                        let _ = window.emit("global_shortcut_ocr_triggered", ());
+                    }
+                }) {
+                    eprintln!("[SETUP] Erreur lors de l'enregistrement du raccourci OCR: {:?}", e);
+                    return Err(format!("Erreur lors de l'enregistrement du raccourci OCR: {:?}", e));
+                }
+                eprintln!(
+                    "[SETUP] Raccourci OCR enregistré avec succès: {}",
+                    ocr_shortcut_str
                 );
                 Ok(())
             }
             Err(e) => {
                 eprintln!(
-                    "[SETUP] Erreur lors du parsing du raccourci {}: {:?}",
-                    shortcut_str, e
+                    "[SETUP] Erreur lors du parsing du raccourci OCR {}: {:?}",
+                    ocr_shortcut_str, e
                 );
-                Err(format!("Erreur lors du parsing du raccourci: {:?}", e))
+                Err(format!("Erreur lors du parsing du raccourci OCR: {:?}", e))
             }
         }
     } else {
@@ -226,6 +267,18 @@ fn load_shortcut_config() -> Result<ClipboardShortcut, String> {
 fn save_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
     let mut config = load_config()?;
     config.clipboard_shortcut = shortcut.clone();
+    save_config(&config)
+}
+
+#[tauri::command]
+fn load_ocr_shortcut_config() -> Result<ClipboardShortcut, String> {
+    load_config().map(|cfg| cfg.ocr_shortcut)
+}
+
+#[tauri::command]
+fn save_ocr_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
+    let mut config = load_config()?;
+    config.ocr_shortcut = shortcut.clone();
     save_config(&config)
 }
 
@@ -352,27 +405,27 @@ fn translate_if_needed(
 fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
     eprintln!("[REGISTER] Début de register_global_shortcut()");
     let config = load_config()?;
-    let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
 
+    // Enregistrer le raccourci clipboard
+    let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
     let shortcut = shortcut_str
         .parse::<Shortcut>()
-        .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
+        .map_err(|e| format!("Erreur lors du parsing du raccourci clipboard: {:?}", e))?;
 
-    eprintln!("[REGISTER] Raccourci à enregistrer: {}", shortcut_str);
-    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci précédent");
+    eprintln!("[REGISTER] Raccourci clipboard à enregistrer: {}", shortcut_str);
+    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci clipboard précédent");
 
-    // S'assurer que le raccourci précédent est désenregistré
     let unregister_result = app_handle.global_shortcut().unregister(shortcut);
     eprintln!(
-        "[REGISTER] Résultat du désenregistrement: {:?}",
+        "[REGISTER] Résultat du désenregistrement clipboard: {:?}",
         unregister_result
     );
 
-    eprintln!("[REGISTER] Enregistrement du raccourci");
+    eprintln!("[REGISTER] Enregistrement du raccourci clipboard");
     app_handle
         .global_shortcut()
         .on_shortcut(shortcut, move |app, _accelerator, _state| {
-            eprintln!("[REGISTER CALLBACK] Raccourci global déclenché!");
+            eprintln!("[REGISTER CALLBACK] Raccourci clipboard déclenché!");
             if let Some(window) = app.get_webview_window("main") {
                 eprintln!("[REGISTER CALLBACK] Émission de global_shortcut_triggered");
                 let _ = window.emit("global_shortcut_triggered", ());
@@ -380,8 +433,40 @@ fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
         })
         .map_err(|e| {
             format!(
-                "Erreur lors de l'enregistrement du raccourci {}: {:?}",
+                "Erreur lors de l'enregistrement du raccourci clipboard {}: {:?}",
                 shortcut_str, e
+            )
+        })?;
+
+    // Enregistrer le raccourci OCR
+    let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
+    let ocr_shortcut = ocr_shortcut_str
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Erreur lors du parsing du raccourci OCR: {:?}", e))?;
+
+    eprintln!("[REGISTER] Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
+    eprintln!("[REGISTER] Tentative de désenregistrement du raccourci OCR précédent");
+
+    let unregister_result = app_handle.global_shortcut().unregister(ocr_shortcut);
+    eprintln!(
+        "[REGISTER] Résultat du désenregistrement OCR: {:?}",
+        unregister_result
+    );
+
+    eprintln!("[REGISTER] Enregistrement du raccourci OCR");
+    app_handle
+        .global_shortcut()
+        .on_shortcut(ocr_shortcut, move |app, _accelerator, _state| {
+            eprintln!("[REGISTER CALLBACK] Raccourci OCR déclenché!");
+            if let Some(window) = app.get_webview_window("main") {
+                eprintln!("[REGISTER CALLBACK] Émission de global_shortcut_ocr_triggered");
+                let _ = window.emit("global_shortcut_ocr_triggered", ());
+            }
+        })
+        .map_err(|e| {
+            format!(
+                "Erreur lors de l'enregistrement du raccourci OCR {}: {:?}",
+                ocr_shortcut_str, e
             )
         })
 }
@@ -731,6 +816,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_shortcut_config,
             save_shortcut_config,
+            load_ocr_shortcut_config,
+            save_ocr_shortcut_config,
             register_global_shortcut,
             unregister_global_shortcut,
             load_playback_speed,

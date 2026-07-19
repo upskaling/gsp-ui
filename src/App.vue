@@ -21,6 +21,17 @@ const shortcutConfig = ref<ClipboardShortcut>({
   key: "c",
 });
 const recordingKey = ref(false);
+
+const showOCRShortcutConfig = ref(false);
+const ocrShortcutConfig = ref<ClipboardShortcut>({
+  ctrl: true,
+  shift: false,
+  alt: true,
+  meta: false,
+  key: "o",
+});
+const recordingOCRKey = ref(false);
+
 const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
 const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
@@ -93,6 +104,17 @@ const handleKeydown = (event: KeyboardEvent) => {
     return;
   }
 
+  if (recordingOCRKey.value) {
+    event.preventDefault();
+    ocrShortcutConfig.value.key = event.key.toLowerCase();
+    ocrShortcutConfig.value.ctrl = event.ctrlKey;
+    ocrShortcutConfig.value.shift = event.shiftKey;
+    ocrShortcutConfig.value.alt = event.altKey;
+    ocrShortcutConfig.value.meta = event.metaKey;
+    recordingOCRKey.value = false;
+    return;
+  }
+
   const { ctrl, shift, alt, meta, key } = shortcutConfig.value;
   const matches =
     ctrl === event.ctrlKey &&
@@ -112,6 +134,14 @@ async function loadShortcutConfig() {
     shortcutConfig.value = await invoke("load_shortcut_config");
   } catch (error) {
     console.error("Erreur lors du chargement de la configuration:", error);
+  }
+}
+
+async function loadOCRShortcutConfig() {
+  try {
+    ocrShortcutConfig.value = await invoke("load_ocr_shortcut_config");
+  } catch (error) {
+    console.error("Erreur lors du chargement de la configuration OCR:", error);
   }
 }
 
@@ -219,8 +249,34 @@ async function saveShortcutConfig() {
   }
 }
 
+async function saveOCRShortcutConfig() {
+  console.log("[saveOCRShortcutConfig] Début de saveOCRShortcutConfig()");
+  try {
+    console.log("[saveOCRShortcutConfig] Sauvegarde de la config OCR");
+    await invoke("save_ocr_shortcut_config", { shortcut: ocrShortcutConfig.value });
+
+    // Réenregistrer le raccourci global avec la nouvelle configuration
+    try {
+      console.log("[saveOCRShortcutConfig] Désenregistrement du raccourci OCR");
+      await invoke("unregister_global_shortcut");
+    } catch {
+      // Ignorer si le désenregistrement échoue (raccourci peut ne pas être enregistré)
+      console.log("[saveOCRShortcutConfig] Désenregistrement échoué (ignoré)");
+    }
+
+    console.log("[saveOCRShortcutConfig] Enregistrement du nouveau raccourci OCR");
+    await invoke("register_global_shortcut");
+    showOCRShortcutConfig.value = false;
+    console.log("[saveOCRShortcutConfig] Terminé");
+  } catch (error) {
+    console.log("[saveOCRShortcutConfig] Erreur:", error);
+    alert(`Erreur lors de la sauvegarde: ${error}`);
+  }
+}
+
 onMounted(async () => {
   await loadShortcutConfig();
+  await loadOCRShortcutConfig();
   await loadPlaybackSpeed();
   await loadSourceLanguage();
   await loadTargetLanguage();
@@ -268,6 +324,37 @@ onMounted(async () => {
   } catch (error) {
     console.error("[Global Shortcut] Erreur lors de la configuration du listener:", error);
   }
+
+  // Écouter l'événement du raccourci OCR
+  try {
+    await listen("global_shortcut_ocr_triggered", async () => {
+      console.log("[Global Shortcut OCR] Raccourci OCR reçu! isSpeaking =", isSpeaking.value);
+
+      // Ignorer les appels en double si un traitement est en cours
+      if (shortcutInProgress) {
+        console.log("[Global Shortcut OCR] Appel ignoré (déjà en cours)");
+        return;
+      }
+
+      shortcutInProgress = true;
+
+      if (isSpeaking.value) {
+        console.log("[Global Shortcut OCR] Appel de stopSpeaking()");
+        await stopSpeaking();
+      } else {
+        console.log("[Global Shortcut OCR] Appel de speakOCR()");
+        await speakOCR();
+      }
+
+      // Attendre avant de réinitialiser le flag pour éviter les appels en double
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      shortcutInProgress = false;
+      console.log("[Global Shortcut OCR] Flag réinitialisé");
+    });
+    console.log("[Global Shortcut OCR] Listener du raccourci OCR configuré");
+  } catch (error) {
+    console.error("[Global Shortcut OCR] Erreur lors de la configuration du listener:", error);
+  }
 });
 
 onUnmounted(() => {
@@ -279,12 +366,14 @@ onUnmounted(() => {
   <main class="container">
     <div class="clipboard-section">
       <div class="clipboard-controls">
+        <div class="language-controls">
         <button @click="speakSelection" :disabled="isSpeaking" class="speak-btn">
           {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
         </button>
         <button @click="speakOCR" :disabled="isSpeaking" class="speak-ocr-btn">
           {{ isSpeaking ? "📸 Capture en cours..." : "📸 Lecture OCR" }}
         </button>
+        </div>
       </div>
       <div class="clipboard-controls">
         <div class="speed-controls">
@@ -332,6 +421,9 @@ onUnmounted(() => {
         <button @click="showShortcutConfig = !showShortcutConfig" class="config-btn">
           ⚙️ Configurer
         </button>
+        <button @click="showOCRShortcutConfig = !showOCRShortcutConfig" class="config-btn">
+          ⚙️ Raccourci OCR
+        </button>
         <label class="dev-mode-toggle">
           <input type="checkbox" v-model="devMode" @change="toggleDevMode" />
           🧪 Dev
@@ -339,7 +431,7 @@ onUnmounted(() => {
       </div>
 
       <div v-if="showShortcutConfig" class="shortcut-config">
-        <h3>Configurer le raccourci clavier</h3>
+        <h3>Configurer le raccourci clavier - Lecture</h3>
         <div class="shortcut-options">
           <label>
             <input v-model="shortcutConfig.ctrl" type="checkbox" /> Ctrl
@@ -366,6 +458,37 @@ onUnmounted(() => {
         <div class="config-buttons">
           <button @click="saveShortcutConfig" class="save-btn">Enregistrer</button>
           <button @click="showShortcutConfig = false" class="cancel-btn">Annuler</button>
+        </div>
+      </div>
+
+      <div v-if="showOCRShortcutConfig" class="shortcut-config">
+        <h3>Configurer le raccourci clavier - OCR</h3>
+        <div class="shortcut-options">
+          <label>
+            <input v-model="ocrShortcutConfig.ctrl" type="checkbox" /> Ctrl
+          </label>
+          <label>
+            <input v-model="ocrShortcutConfig.alt" type="checkbox" /> Alt
+          </label>
+          <label>
+            <input v-model="ocrShortcutConfig.meta" type="checkbox" /> Super
+          </label>
+          <label>
+            <input v-model="ocrShortcutConfig.shift" type="checkbox" /> Shift
+          </label>
+        </div>
+        <div class="key-input">
+          <button
+            @click="recordingOCRKey = !recordingOCRKey"
+            :class="{ recording: recordingOCRKey }"
+            class="record-btn"
+          >
+            {{ recordingOCRKey ? "Appuyez sur une touche..." : `Touche: ${ocrShortcutConfig.key.toUpperCase()}` }}
+          </button>
+        </div>
+        <div class="config-buttons">
+          <button @click="saveOCRShortcutConfig" class="save-btn">Enregistrer</button>
+          <button @click="showOCRShortcutConfig = false" class="cancel-btn">Annuler</button>
         </div>
       </div>
 
