@@ -12,7 +12,7 @@ interface ClipboardShortcut {
   key: string;
 }
 
-const showShortcutConfig = ref(false);
+const showConfig = ref(false);
 const shortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
   shift: true,
@@ -22,7 +22,6 @@ const shortcutConfig = ref<ClipboardShortcut>({
 });
 const recordingKey = ref(false);
 
-const showOCRShortcutConfig = ref(false);
 const ocrShortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
   shift: false,
@@ -224,52 +223,30 @@ async function setPlaybackSpeed(speed: number) {
   }
 }
 
-async function saveShortcutConfig() {
-  console.log("[saveShortcutConfig] Début de saveShortcutConfig()");
+async function saveAllShortcutConfigs() {
+  console.log("[saveAllShortcutConfigs] Début");
   try {
-    console.log("[saveShortcutConfig] Sauvegarde de la config");
+    console.log("[saveAllShortcutConfigs] Sauvegarde de la config lecture");
     await invoke("save_shortcut_config", { shortcut: shortcutConfig.value });
 
-    // Réenregistrer le raccourci global avec la nouvelle configuration
-    try {
-      console.log("[saveShortcutConfig] Désenregistrement du raccourci");
-      await invoke("unregister_global_shortcut");
-    } catch {
-      // Ignorer si le désenregistrement échoue (raccourci peut ne pas être enregistré)
-      console.log("[saveShortcutConfig] Désenregistrement échoué (ignoré)");
-    }
-
-    console.log("[saveShortcutConfig] Enregistrement du nouveau raccourci");
-    await invoke("register_global_shortcut");
-    showShortcutConfig.value = false;
-    console.log("[saveShortcutConfig] Terminé");
-  } catch (error) {
-    console.log("[saveShortcutConfig] Erreur:", error);
-    alert(`Erreur lors de la sauvegarde: ${error}`);
-  }
-}
-
-async function saveOCRShortcutConfig() {
-  console.log("[saveOCRShortcutConfig] Début de saveOCRShortcutConfig()");
-  try {
-    console.log("[saveOCRShortcutConfig] Sauvegarde de la config OCR");
+    console.log("[saveAllShortcutConfigs] Sauvegarde de la config OCR");
     await invoke("save_ocr_shortcut_config", { shortcut: ocrShortcutConfig.value });
 
-    // Réenregistrer le raccourci global avec la nouvelle configuration
+    // Réenregistrer les raccourcis globaux avec la nouvelle configuration
     try {
-      console.log("[saveOCRShortcutConfig] Désenregistrement du raccourci OCR");
+      console.log("[saveAllShortcutConfigs] Désenregistrement des raccourcis");
       await invoke("unregister_global_shortcut");
     } catch {
-      // Ignorer si le désenregistrement échoue (raccourci peut ne pas être enregistré)
-      console.log("[saveOCRShortcutConfig] Désenregistrement échoué (ignoré)");
+      // Ignorer si le désenregistrement échoue (raccourcis peuvent ne pas être enregistrés)
+      console.log("[saveAllShortcutConfigs] Désenregistrement échoué (ignoré)");
     }
 
-    console.log("[saveOCRShortcutConfig] Enregistrement du nouveau raccourci OCR");
+    console.log("[saveAllShortcutConfigs] Enregistrement des nouveaux raccourcis");
     await invoke("register_global_shortcut");
-    showOCRShortcutConfig.value = false;
-    console.log("[saveOCRShortcutConfig] Terminé");
+    showConfig.value = false;
+    console.log("[saveAllShortcutConfigs] Terminé");
   } catch (error) {
-    console.log("[saveOCRShortcutConfig] Erreur:", error);
+    console.log("[saveAllShortcutConfigs] Erreur:", error);
     alert(`Erreur lors de la sauvegarde: ${error}`);
   }
 }
@@ -418,11 +395,8 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        <button @click="showShortcutConfig = !showShortcutConfig" class="config-btn">
+        <button @click="showConfig = !showConfig" class="config-btn">
           ⚙️ Configurer
-        </button>
-        <button @click="showOCRShortcutConfig = !showOCRShortcutConfig" class="config-btn">
-          ⚙️ Raccourci OCR
         </button>
         <label class="dev-mode-toggle">
           <input type="checkbox" v-model="devMode" @change="toggleDevMode" />
@@ -430,65 +404,64 @@ onUnmounted(() => {
         </label>
       </div>
 
-      <div v-if="showShortcutConfig" class="shortcut-config">
-        <h3>Configurer le raccourci clavier - Lecture</h3>
-        <div class="shortcut-options">
-          <label>
-            <input v-model="shortcutConfig.ctrl" type="checkbox" /> Ctrl
-          </label>
-          <label>
-            <input v-model="shortcutConfig.alt" type="checkbox" /> Alt
-          </label>
-          <label>
-            <input v-model="shortcutConfig.meta" type="checkbox" /> Super
-          </label>
-          <label>
-            <input v-model="shortcutConfig.shift" type="checkbox" /> Shift
-          </label>
+      <div v-if="showConfig" class="shortcut-config-unified">
+        <div class="config-section">
+          <h3>Raccourci - Lecture</h3>
+          <div class="shortcut-options">
+            <label>
+              <input v-model="shortcutConfig.ctrl" type="checkbox" /> Ctrl
+            </label>
+            <label>
+              <input v-model="shortcutConfig.alt" type="checkbox" /> Alt
+            </label>
+            <label>
+              <input v-model="shortcutConfig.meta" type="checkbox" /> Super
+            </label>
+            <label>
+              <input v-model="shortcutConfig.shift" type="checkbox" /> Shift
+            </label>
+          </div>
+          <div class="key-input">
+            <button
+              @click="recordingKey = !recordingKey"
+              :class="{ recording: recordingKey }"
+              class="record-btn"
+            >
+              {{ recordingKey ? "Appuyez sur une touche..." : `Touche: ${shortcutConfig.key.toUpperCase()}` }}
+            </button>
+          </div>
         </div>
-        <div class="key-input">
-          <button
-            @click="recordingKey = !recordingKey"
-            :class="{ recording: recordingKey }"
-            class="record-btn"
-          >
-            {{ recordingKey ? "Appuyez sur une touche..." : `Touche: ${shortcutConfig.key.toUpperCase()}` }}
-          </button>
-        </div>
-        <div class="config-buttons">
-          <button @click="saveShortcutConfig" class="save-btn">Enregistrer</button>
-          <button @click="showShortcutConfig = false" class="cancel-btn">Annuler</button>
-        </div>
-      </div>
 
-      <div v-if="showOCRShortcutConfig" class="shortcut-config">
-        <h3>Configurer le raccourci clavier - OCR</h3>
-        <div class="shortcut-options">
-          <label>
-            <input v-model="ocrShortcutConfig.ctrl" type="checkbox" /> Ctrl
-          </label>
-          <label>
-            <input v-model="ocrShortcutConfig.alt" type="checkbox" /> Alt
-          </label>
-          <label>
-            <input v-model="ocrShortcutConfig.meta" type="checkbox" /> Super
-          </label>
-          <label>
-            <input v-model="ocrShortcutConfig.shift" type="checkbox" /> Shift
-          </label>
+        <div class="config-section">
+          <h3>Raccourci - OCR</h3>
+          <div class="shortcut-options">
+            <label>
+              <input v-model="ocrShortcutConfig.ctrl" type="checkbox" /> Ctrl
+            </label>
+            <label>
+              <input v-model="ocrShortcutConfig.alt" type="checkbox" /> Alt
+            </label>
+            <label>
+              <input v-model="ocrShortcutConfig.meta" type="checkbox" /> Super
+            </label>
+            <label>
+              <input v-model="ocrShortcutConfig.shift" type="checkbox" /> Shift
+            </label>
+          </div>
+          <div class="key-input">
+            <button
+              @click="recordingOCRKey = !recordingOCRKey"
+              :class="{ recording: recordingOCRKey }"
+              class="record-btn"
+            >
+              {{ recordingOCRKey ? "Appuyez sur une touche..." : `Touche: ${ocrShortcutConfig.key.toUpperCase()}` }}
+            </button>
+          </div>
         </div>
-        <div class="key-input">
-          <button
-            @click="recordingOCRKey = !recordingOCRKey"
-            :class="{ recording: recordingOCRKey }"
-            class="record-btn"
-          >
-            {{ recordingOCRKey ? "Appuyez sur une touche..." : `Touche: ${ocrShortcutConfig.key.toUpperCase()}` }}
-          </button>
-        </div>
-        <div class="config-buttons">
-          <button @click="saveOCRShortcutConfig" class="save-btn">Enregistrer</button>
-          <button @click="showOCRShortcutConfig = false" class="cancel-btn">Annuler</button>
+
+        <div class="config-buttons-unified">
+          <button @click="saveAllShortcutConfigs" class="save-btn">Enregistrer</button>
+          <button @click="showConfig = false" class="cancel-btn">Annuler</button>
         </div>
       </div>
 
