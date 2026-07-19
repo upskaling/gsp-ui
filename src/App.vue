@@ -24,19 +24,40 @@ const shortcutConfig = ref<ClipboardShortcut>({
   key: "c",
 });
 const recordingKey = ref(false);
+const isSpeaking = ref(false);
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
   greetMsg.value = await invoke("greet", { name: name.value });
 }
 
-async function getClipboardContent() {
+async function getClipboardContent(autoSpeak: boolean = false) {
   try {
     clipboardError.value = "";
     clipboardContent.value = await invoke("get_clipboard_content");
+    if (autoSpeak && clipboardContent.value) {
+      await speakSelection();
+    }
   } catch (error) {
     clipboardError.value = `Erreur: ${error}`;
     clipboardContent.value = "";
+  }
+}
+
+async function speakSelection() {
+  if (!clipboardContent.value) {
+    clipboardError.value = "Aucun contenu à lire";
+    return;
+  }
+
+  try {
+    isSpeaking.value = true;
+    clipboardError.value = "";
+    await invoke("speak", { text: clipboardContent.value });
+  } catch (error) {
+    clipboardError.value = `Erreur lors de la lecture: ${error}`;
+  } finally {
+    isSpeaking.value = false;
   }
 }
 
@@ -100,7 +121,7 @@ onMounted(async () => {
   try {
     await listen("global_shortcut_triggered", () => {
       console.log("Événement du raccourci global reçu!");
-      getClipboardContent();
+      getClipboardContent(true);
     });
     console.log("Listener du raccourci global configuré");
   } catch (error) {
@@ -128,6 +149,9 @@ onUnmounted(() => {
           <span class="shortcut-hint">
             ({{ shortcutConfig.ctrl ? "Ctrl+" : "" }}{{ shortcutConfig.alt ? "Alt+" : "" }}{{ shortcutConfig.meta ? "Super+" : "" }}{{ shortcutConfig.shift ? "Shift+" : "" }}{{ shortcutConfig.key.toUpperCase() }})
           </span>
+        </button>
+        <button @click="speakSelection" :disabled="isSpeaking || !clipboardContent" class="speak-btn">
+          {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
         </button>
         <button @click="showShortcutConfig = !showShortcutConfig" class="config-btn">
           ⚙️ Configurer
@@ -229,6 +253,16 @@ onUnmounted(() => {
 .config-btn {
   font-size: 0.9em;
   padding: 0.5em 1em;
+}
+
+.speak-btn {
+  font-size: 0.9em;
+  padding: 0.5em 1em;
+}
+
+.speak-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .shortcut-config {

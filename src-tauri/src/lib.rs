@@ -1,3 +1,5 @@
+mod tts;
+
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -6,6 +8,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tts::{TtsEngine, EspeakNg};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct AppConfig {
@@ -267,6 +270,13 @@ fn unregister_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Erreur lors du désenregistrement du raccourci: {}", e))
 }
 
+#[tauri::command]
+fn speak(text: String) -> Result<(), String> {
+    let tts = EspeakNg::new();
+    tts.speak(&text);
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -296,7 +306,8 @@ pub fn run() {
             load_shortcut_config,
             save_shortcut_config,
             register_global_shortcut,
-            unregister_global_shortcut
+            unregister_global_shortcut,
+            speak
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
