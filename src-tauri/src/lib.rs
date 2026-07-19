@@ -528,23 +528,20 @@ fn speak_ocr(
 
     debug!("SPEAK_OCR", "Début de speak_ocr()");
 
-    let temp_dir = std::env::temp_dir();
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|e| format!("Erreur lors de la récupération du timestamp: {}", e))?
         .as_millis();
 
-    let screenshot_path = temp_dir.join(format!("gsp-ui-screenshot-{}.png", timestamp));
-    let screenshot_path_str = screenshot_path
-        .to_str()
-        .ok_or_else(|| "Impossible de convertir le chemin en string".to_string())?;
+    let screenshot_path = format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp);
+    let screenshot_path_str = screenshot_path.as_str();
 
     debug!("SPEAK_OCR", "Chemin de capture: {}", screenshot_path_str);
     debug!("SPEAK_OCR", "Lancement de xfce4-screenshooter");
 
     xfce4_screenshooter_region(screenshot_path_str);
 
-    if !screenshot_path.exists() {
+    if !std::path::Path::new(&screenshot_path).exists() {
         debug!("SPEAK_OCR", "Erreur: le fichier de capture n'a pas été créé");
         return Err("La capture d'écran a échoué".to_string());
     }
@@ -559,11 +556,11 @@ fn speak_ocr(
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
 
     let tesseract_lang = match source_lang {
-        "auto" | "en" => "en-GB",
         "fr" => "fr-FR",
         "de" => "de-DE",
         "es" => "es-ES",
         "it" => "it-IT",
+        "auto" => "auto",
         _ => "en-GB",
     };
 
