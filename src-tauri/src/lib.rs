@@ -1,8 +1,9 @@
 mod language_detector;
 mod textutils;
+mod translator;
 mod tts;
 
-use language_detector::detect_language;
+use language_detector::{detect_language, DetectedLanguage};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -12,6 +13,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
 struct PlaybackState {
@@ -258,6 +260,30 @@ fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
     keys.join("+")
 }
 
+/// Traduit le texte en français si la langue détectée est l'anglais
+fn translate_to_french_if_english(
+    text: &str,
+    detected_lang: DetectedLanguage,
+) -> Result<String, String> {
+    match detected_lang {
+        DetectedLanguage::English => {
+            eprintln!("[TRANSLATOR] Texte en anglais détecté, traduction en français...");
+            match translate(text, "en", "fr") {
+                Ok(translated) => {
+                    eprintln!("[TRANSLATOR] Traduction réussie");
+                    Ok(translated)
+                }
+                Err(e) => {
+                    eprintln!("[TRANSLATOR] Erreur de traduction: {}", e);
+                    eprintln!("[TRANSLATOR] Utilisation du texte original en anglais");
+                    Ok(text.to_string())
+                }
+            }
+        }
+        DetectedLanguage::French => Ok(text.to_string()),
+    }
+}
+
 #[tauri::command]
 fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
     eprintln!("[REGISTER] Début de register_global_shortcut()");
@@ -322,6 +348,8 @@ fn speak(
     let detected_lang = detect_language(&text);
     eprintln!("[SPEAK] Langue détectée: {:?}", detected_lang);
 
+    let text_to_speak = translate_to_french_if_english(&text, detected_lang)?;
+
     let mut playback = state
         .lock()
         .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
@@ -335,7 +363,7 @@ fn speak(
 
     eprintln!("[SPEAK] Création du TTS engine");
     let mut tts = EspeakNg::new();
-    tts.set_lang(detected_lang.as_espeak_code().to_string());
+    tts.set_lang("fr".to_string());
 
     // Charger la vitesse sauvegardée
     let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
@@ -349,7 +377,7 @@ fn speak(
         playback_speed, espeak_speed
     );
     eprintln!("[SPEAK] Appel de tts.speak()");
-    let mut child = tts.speak(&text)?;
+    let mut child = tts.speak(&text_to_speak)?;
     let pid = child.id();
     eprintln!("[SPEAK] Child lancé avec PID: {}", pid);
 
@@ -426,6 +454,8 @@ fn speak_clipboard(
     let detected_lang = detect_language(&text);
     eprintln!("[SPEAK_CLIPBOARD] Langue détectée: {:?}", detected_lang);
 
+    let text_to_speak = translate_to_french_if_english(&text, detected_lang)?;
+
     let mut playback = state
         .lock()
         .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
@@ -442,7 +472,7 @@ fn speak_clipboard(
 
     eprintln!("[SPEAK_CLIPBOARD] Création du TTS engine");
     let mut tts = EspeakNg::new();
-    tts.set_lang(detected_lang.as_espeak_code().to_string());
+    tts.set_lang("fr".to_string());
 
     let playback_speed = load_config().map(|cfg| cfg.playback_speed).unwrap_or(1.0);
 
@@ -454,7 +484,7 @@ fn speak_clipboard(
         playback_speed, espeak_speed
     );
     eprintln!("[SPEAK_CLIPBOARD] Appel de tts.speak()");
-    let mut child = tts.speak(&text)?;
+    let mut child = tts.speak(&text_to_speak)?;
     let pid = child.id();
     eprintln!("[SPEAK_CLIPBOARD] Child lancé avec PID: {}", pid);
 

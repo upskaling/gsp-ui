@@ -32,6 +32,5 @@ pub fn detect_language(text: &str) -> DetectedLanguage {
     match detector.detect_language_of(text) {
         Some(English) => DetectedLanguage::English,
         Some(French) | None => DetectedLanguage::French,
-        _ => DetectedLanguage::French,
     }
 }
