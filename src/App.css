@@ -13,9 +13,6 @@
   background-color: #f9f9f9;
 }
 
-.language-controls {
-  margin-bottom: 1rem;
-}
 
 
 .shortcut-hint {
@@ -24,6 +21,16 @@
   color: #666;
   margin-top: 0.3em;
   font-weight: normal;
+}
+
+.recording-hint {
+  display: block;
+  font-size: 0.85em;
+  color: #0066cc;
+  margin-top: 0.5em;
+  margin-bottom: 0;
+  font-weight: 500;
+  font-style: italic;
 }
 
 .clipboard-controls {
@@ -124,6 +131,17 @@
   border-color: #218838;
 }
 
+.reset-btn {
+  background-color: #ffc107;
+  color: #000;
+  border-color: #ffc107;
+}
+
+.reset-btn:hover {
+  background-color: #e0a800;
+  border-color: #e0a800;
+}
+
 .cancel-btn {
   background-color: #6c757d;
   color: white;
@@ -176,6 +194,10 @@
 .language-controls label {
   font-weight: 500;
   white-space: nowrap;
+}
+
+.clipboard-actions {
+  margin-bottom: 1rem;
 }
 
 .language-select {
@@ -246,6 +268,46 @@
   gap: 1rem;
   justify-content: center;
   margin-top: 0.5rem;
+}
+
+.modifiers-grid {
+  display: flex;
+  margin-bottom: 1rem;
+}
+
+.modifier-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.5rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.modifier-checkbox:hover {
+  background-color: #e8f0ff;
+  border-color: #c33;
+}
+
+.modifier-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.modifier-checkbox span {
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .modifier-checkbox:hover {
+    background-color: #2a2a3a;
+    border-color: #c33;
+  }
 }
 
 :root {
@@ -388,6 +450,15 @@ button {
 
   .save-btn:hover {
     background-color: #218838;
+  }
+
+  .reset-btn {
+    background-color: #ffc107;
+    color: #000;
+  }
+
+  .reset-btn:hover {
+    background-color: #e0a800;
   }
 
   .cancel-btn {

@@ -1,11 +1,13 @@
 mod language_detector;
 mod ocr;
 mod screenshooter;
+mod shortcut;
 mod textutils;
 mod translator;
 mod tts;
 
 use language_detector::{detect_language, DetectedLanguage};
+use log::{error, info};
 use ocr::tesseract;
 use serde::{Deserialize, Serialize};
 use screenshooter::xfce4_screenshooter_region;
@@ -16,7 +18,6 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
@@ -68,7 +69,7 @@ impl Default for ClipboardShortcut {
             shift: true,
             alt: false,
             meta: false,
-            key: "c".to_string(),
+            key: "V".to_string(),
         }
     }
 }
@@ -81,7 +82,7 @@ impl Default for AppConfig {
                 shift: true,
                 alt: false,
                 meta: false,
-                key: "c".to_string(),
+                key: "V".to_string(),
             },
             ocr_shortcut: ClipboardShortcut {
                 ctrl: true,
@@ -155,78 +156,63 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     Ok(Image::new(static_data, width, height))
 }
 
-fn shortcut_to_string(shortcut: &ClipboardShortcut) -> String {
-    let mut keys = vec![];
-    if shortcut.ctrl {
-        keys.push("ctrl");
+fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
+    info!("Début de setup_global_shortcut()");
+
+    // Migrer la configuration existante si nécessaire
+    if let Err(e) = migrate_old_shortcut_config() {
+        error!("Erreur de migration de la configuration: {}", e);
     }
-    if shortcut.shift {
-        keys.push("shift");
-    }
-    if shortcut.alt {
-        keys.push("alt");
-    }
-    if shortcut.meta {
-        keys.push("meta");
-    }
-    keys.push(&shortcut.key);
-    keys.join("+")
-}
 
-fn register_shortcut_internal(
-    app_handle: &AppHandle,
-    shortcut_str: &str,
-    is_ocr: bool,
-    log_prefix: &str,
-) -> Result<(), String> {
-    let shortcut = shortcut_str
-        .parse::<Shortcut>()
-        .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
-
-    debug!(log_prefix, "Tentative de désenregistrement du raccourci précédent");
-
-    let unregister_result = app_handle.global_shortcut().unregister(shortcut);
-    debug!(log_prefix, "Résultat du désenregistrement: {:?}", unregister_result);
-
-    debug!(log_prefix, "Enregistrement du raccourci");
-    app_handle
-        .global_shortcut()
-        .on_shortcut(shortcut, move |app, _accelerator, _state| {
-            let event_name = if is_ocr {
-                "global_shortcut_ocr_triggered"
-            } else {
-                "global_shortcut_triggered"
-            };
-            debug!("CALLBACK", "Raccourci déclenché!");
-            if let Some(window) = app.get_webview_window("main") {
-                debug!("CALLBACK", "Émission de {}", event_name);
-                let _ = window.emit(event_name, ());
-            }
-        })
-        .map_err(|e| format!("Erreur lors de l'enregistrement: {:?}", e))?;
-
-    debug!(log_prefix, "Raccourci enregistré avec succès");
+    shortcut::init_shortcuts(app.handle());
     Ok(())
 }
 
-fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
-    debug!("SETUP", "Début de setup_global_shortcut()");
-    let app_handle = app.handle().clone();
+fn migrate_old_shortcut_config() -> Result<(), String> {
+    use std::collections::HashMap;
 
-    if let Ok(config) = load_config() {
-        let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-        debug!("SETUP", "Raccourci clipboard à enregistrer: {}", shortcut_str);
+    let config = load_config()?;
+    let shortcut_config_path = shortcut::settings::get_config_path()?;
 
-        register_shortcut_internal(&app_handle, &shortcut_str, false, "SETUP")?;
+    if !shortcut_config_path.exists() {
+        // Créer la nouvelle configuration à partir de l'ancienne
+        let mut bindings = HashMap::new();
 
-        let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
-        debug!("SETUP", "Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
+        bindings.insert(
+            "clipboard".to_string(),
+            shortcut::ShortcutBinding {
+                id: "clipboard".to_string(),
+                current_binding: format!(
+                    "{}{}{}{}",
+                    if config.clipboard_shortcut.ctrl { "ctrl+" } else { "" },
+                    if config.clipboard_shortcut.shift { "shift+" } else { "" },
+                    if config.clipboard_shortcut.alt { "alt+" } else { "" },
+                    config.clipboard_shortcut.key
+                ),
+                default_binding: "ctrl+shift+v".to_string(),
+            },
+        );
 
-        register_shortcut_internal(&app_handle, &ocr_shortcut_str, true, "SETUP")
-    } else {
-        debug!("SETUP", "Impossible de charger la configuration");
-        Err("Impossible de charger la configuration".to_string())
+        bindings.insert(
+            "ocr".to_string(),
+            shortcut::ShortcutBinding {
+                id: "ocr".to_string(),
+                current_binding: format!(
+                    "{}{}{}{}",
+                    if config.ocr_shortcut.ctrl { "ctrl+" } else { "" },
+                    if config.ocr_shortcut.shift { "shift+" } else { "" },
+                    if config.ocr_shortcut.alt { "alt+" } else { "" },
+                    config.ocr_shortcut.key
+                ),
+                default_binding: "ctrl+alt+o".to_string(),
+            },
+        );
+
+        let shortcut_config = shortcut::ShortcutConfig { bindings };
+        shortcut::settings::save_shortcut_config(&shortcut_config)?;
     }
+
+    Ok(())
 }
 
 fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
@@ -276,22 +262,89 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
 
 #[tauri::command]
 fn load_shortcut_config() -> Result<ClipboardShortcut, String> {
-    load_config().map(|cfg| cfg.clipboard_shortcut)
+    let config = shortcut::settings::load_shortcut_config()?;
+    let binding = config
+        .bindings
+        .get("clipboard")
+        .ok_or("Raccourci clipboard non trouvé")?;
+
+    // Parser le binding en format ClipboardShortcut
+    parse_binding_to_shortcut(&binding.current_binding)
 }
 
 #[tauri::command]
-fn save_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
-    update_config(|cfg| cfg.clipboard_shortcut = shortcut)
+fn save_shortcut_config(app_handle: AppHandle, shortcut: ClipboardShortcut) -> Result<(), String> {
+    // Créer la chaîne de raccourci
+    let shortcut_str = format!(
+        "{}{}{}{}",
+        if shortcut.ctrl { "ctrl+" } else { "" },
+        if shortcut.shift { "shift+" } else { "" },
+        if shortcut.alt { "alt+" } else { "" },
+        shortcut.key
+    );
+
+    // Enregistrer le nouveau raccourci via le module shortcut
+    shortcut::change_binding(app_handle, "clipboard".to_string(), shortcut_str)?;
+
+    Ok(())
 }
 
 #[tauri::command]
 fn load_ocr_shortcut_config() -> Result<ClipboardShortcut, String> {
-    load_config().map(|cfg| cfg.ocr_shortcut)
+    let config = shortcut::settings::load_shortcut_config()?;
+    let binding = config
+        .bindings
+        .get("ocr")
+        .ok_or("Raccourci ocr non trouvé")?;
+
+    // Parser le binding en format ClipboardShortcut
+    parse_binding_to_shortcut(&binding.current_binding)
 }
 
 #[tauri::command]
-fn save_ocr_shortcut_config(shortcut: ClipboardShortcut) -> Result<(), String> {
-    update_config(|cfg| cfg.ocr_shortcut = shortcut)
+fn save_ocr_shortcut_config(app_handle: AppHandle, shortcut: ClipboardShortcut) -> Result<(), String> {
+    // Créer la chaîne de raccourci
+    let shortcut_str = format!(
+        "{}{}{}{}",
+        if shortcut.ctrl { "ctrl+" } else { "" },
+        if shortcut.shift { "shift+" } else { "" },
+        if shortcut.alt { "alt+" } else { "" },
+        shortcut.key
+    );
+
+    // Enregistrer le nouveau raccourci via le module shortcut
+    shortcut::change_binding(app_handle, "ocr".to_string(), shortcut_str)?;
+
+    Ok(())
+}
+
+/// Parser un binding string en ClipboardShortcut
+fn parse_binding_to_shortcut(binding: &str) -> Result<ClipboardShortcut, String> {
+    let parts: Vec<&str> = binding.split('+').collect();
+
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    let mut meta = false;
+    let mut key = String::new();
+
+    for part in &parts {
+        match part.trim() {
+            "ctrl" => ctrl = true,
+            "shift" => shift = true,
+            "alt" => alt = true,
+            "super" => meta = true,
+            k => key = k.to_string(),
+        }
+    }
+
+    Ok(ClipboardShortcut {
+        ctrl,
+        shift,
+        alt,
+        meta,
+        key,
+    })
 }
 
 #[tauri::command]
@@ -332,6 +385,20 @@ fn load_target_language() -> Result<String, String> {
 #[tauri::command]
 fn save_target_language(language: String) -> Result<(), String> {
     update_config(|cfg| cfg.target_language = language)
+}
+
+#[tauri::command]
+fn reset_shortcuts_to_default() -> Result<(), String> {
+    update_config(|cfg| {
+        cfg.clipboard_shortcut = ClipboardShortcut::default();
+        cfg.ocr_shortcut = ClipboardShortcut {
+            ctrl: true,
+            shift: false,
+            alt: true,
+            meta: false,
+            key: "o".to_string(),
+        };
+    })
 }
 
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
@@ -460,34 +527,6 @@ fn execute_speech_pipeline(
     Ok(())
 }
 
-#[tauri::command]
-fn register_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
-    debug!("REGISTER", "Début de register_global_shortcut()");
-    let config = load_config()?;
-
-    let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-    debug!("REGISTER", "Raccourci clipboard à enregistrer: {}", shortcut_str);
-    register_shortcut_internal(&app_handle, &shortcut_str, false, "REGISTER")?;
-
-    let ocr_shortcut_str = shortcut_to_string(&config.ocr_shortcut);
-    debug!("REGISTER", "Raccourci OCR à enregistrer: {}", ocr_shortcut_str);
-    register_shortcut_internal(&app_handle, &ocr_shortcut_str, true, "REGISTER")
-}
-
-#[tauri::command]
-fn unregister_global_shortcut(app_handle: AppHandle) -> Result<(), String> {
-    let config = load_config()?;
-    let shortcut_str = shortcut_to_string(&config.clipboard_shortcut);
-
-    let shortcut = shortcut_str
-        .parse::<Shortcut>()
-        .map_err(|e| format!("Erreur lors du parsing du raccourci: {:?}", e))?;
-
-    app_handle
-        .global_shortcut()
-        .unregister(shortcut)
-        .map_err(|e| format!("Erreur lors du désenregistrement du raccourci: {}", e))
-}
 
 #[tauri::command]
 fn speak(
@@ -692,8 +731,6 @@ pub fn run() {
             save_shortcut_config,
             load_ocr_shortcut_config,
             save_ocr_shortcut_config,
-            register_global_shortcut,
-            unregister_global_shortcut,
             load_playback_speed,
             save_playback_speed,
             load_dev_mode,
@@ -702,6 +739,14 @@ pub fn run() {
             save_source_language,
             load_target_language,
             save_target_language,
+            reset_shortcuts_to_default,
+            shortcut::get_binding,
+            shortcut::get_all_bindings,
+            shortcut::change_binding,
+            shortcut::reset_binding,
+            shortcut::suspend_binding,
+            shortcut::resume_binding,
+            shortcut::format_shortcut_binding,
             speak,
             stop_speak,
             speak_clipboard,

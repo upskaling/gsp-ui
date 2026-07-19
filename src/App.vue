@@ -12,6 +12,12 @@ interface ClipboardShortcut {
   key: string;
 }
 
+interface ShortcutBinding {
+  id: string;
+  current_binding: string;
+  default_binding: string;
+}
+
 const showConfig = ref(false);
 const shortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
@@ -21,6 +27,7 @@ const shortcutConfig = ref<ClipboardShortcut>({
   key: "c",
 });
 const recordingKey = ref(false);
+const recordingBindingId = ref<string | null>(null);
 
 const ocrShortcutConfig = ref<ClipboardShortcut>({
   ctrl: true,
@@ -30,6 +37,7 @@ const ocrShortcutConfig = ref<ClipboardShortcut>({
   key: "o",
 });
 const recordingOCRKey = ref(false);
+const recordingOCRBindingId = ref<string | null>(null);
 
 const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
@@ -47,6 +55,14 @@ const targetLanguageOptions = [
 ];
 const devMode = ref(false);
 let shortcutInProgress = false;
+
+// Tracker pour les touches modificateurs (pour gérer le super+key correctement sur X11)
+const heldModifiers = {
+  ctrl: false,
+  shift: false,
+  alt: false,
+  meta: false,
+};
 
 async function speakSelection() {
   console.log("[speakSelection] Début");
@@ -91,26 +107,85 @@ async function stopSpeaking() {
   }
 }
 
-const handleKeydown = (event: KeyboardEvent) => {
+const handleKeydown = async (event: KeyboardEvent) => {
+  // Mettre à jour les touches modificateurs tracées
+  if (event.key === "Control") heldModifiers.ctrl = event.ctrlKey;
+  if (event.key === "Shift") heldModifiers.shift = event.shiftKey;
+  if (event.key === "Alt") heldModifiers.alt = event.altKey;
+  if (event.key === "Meta") heldModifiers.meta = event.metaKey;
+
+  // Déclencher la lecture si le raccourci correspond et qu'on n'est pas en mode enregistrement
+  if (!recordingKey.value && !recordingOCRKey.value) {
+    const { ctrl, shift, alt, meta, key } = shortcutConfig.value;
+    const keyMatches =
+      ctrl === event.ctrlKey &&
+      shift === event.shiftKey &&
+      alt === event.altKey &&
+      meta === event.metaKey &&
+      key === get_key_from_code(event.code).toLowerCase();
+
+    if (keyMatches) {
+      event.preventDefault();
+      speakSelection();
+    }
+  }
+};
+
+const handleKeyup = async (event: KeyboardEvent) => {
+  // Mettre à jour les touches modificateurs tracées quand elles sont relâchées
+  if (event.key === "Control") heldModifiers.ctrl = event.ctrlKey;
+  if (event.key === "Shift") heldModifiers.shift = event.shiftKey;
+  if (event.key === "Alt") heldModifiers.alt = event.altKey;
+  if (event.key === "Meta") heldModifiers.meta = event.metaKey;
+
   if (recordingKey.value) {
     event.preventDefault();
-    shortcutConfig.value.key = event.key.toLowerCase();
-    shortcutConfig.value.ctrl = event.ctrlKey;
-    shortcutConfig.value.shift = event.shiftKey;
-    shortcutConfig.value.alt = event.altKey;
-    shortcutConfig.value.meta = event.metaKey;
+
+    // Ne pas enregistrer si c'est juste un modificateur seul
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      return;
+    }
+
+    // Utiliser event.code (code physique de la touche) au lieu de event.key (caractère produit)
+    // Cela fonctionne correctement avec les claviers non-QWERTY (azerty, dvorak, etc)
+    const keyCode = get_key_from_code(event.code);
+    shortcutConfig.value.key = keyCode;
     recordingKey.value = false;
+
+    // Reprendre le raccourci après l'enregistrement
+    if (recordingBindingId.value) {
+      try {
+        await invoke("resume_binding", { id: recordingBindingId.value });
+      } catch (error) {
+        console.error("Erreur lors de la reprise du raccourci:", error);
+      }
+      recordingBindingId.value = null;
+    }
     return;
   }
 
   if (recordingOCRKey.value) {
     event.preventDefault();
-    ocrShortcutConfig.value.key = event.key.toLowerCase();
-    ocrShortcutConfig.value.ctrl = event.ctrlKey;
-    ocrShortcutConfig.value.shift = event.shiftKey;
-    ocrShortcutConfig.value.alt = event.altKey;
-    ocrShortcutConfig.value.meta = event.metaKey;
+
+    // Ne pas enregistrer si c'est juste un modificateur seul
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      return;
+    }
+
+    // Utiliser event.code (code physique de la touche) au lieu de event.key (caractère produit)
+    const keyCode = get_key_from_code(event.code);
+    ocrShortcutConfig.value.key = keyCode;
     recordingOCRKey.value = false;
+
+    // Reprendre le raccourci après l'enregistrement
+    if (recordingOCRBindingId.value) {
+      try {
+        await invoke("resume_binding", { id: recordingOCRBindingId.value });
+      } catch (error) {
+        console.error("Erreur lors de la reprise du raccourci OCR:", error);
+      }
+      recordingOCRBindingId.value = null;
+    }
     return;
   }
 
@@ -226,23 +301,29 @@ async function setPlaybackSpeed(speed: number) {
 async function saveAllShortcutConfigs() {
   console.log("[saveAllShortcutConfigs] Début");
   try {
-    console.log("[saveAllShortcutConfigs] Sauvegarde de la config lecture");
-    await invoke("save_shortcut_config", { shortcut: shortcutConfig.value });
+    // Formater les raccourcis avec la commande Rust pour utiliser le bon format selon le système
+    const clipboardBindingStr = await invoke("format_shortcut_binding", {
+      ctrl: shortcutConfig.value.ctrl,
+      shift: shortcutConfig.value.shift,
+      alt: shortcutConfig.value.alt,
+      meta: shortcutConfig.value.meta,
+      key: shortcutConfig.value.key,
+    }) as string;
 
-    console.log("[saveAllShortcutConfigs] Sauvegarde de la config OCR");
-    await invoke("save_ocr_shortcut_config", { shortcut: ocrShortcutConfig.value });
+    const ocrBindingStr = await invoke("format_shortcut_binding", {
+      ctrl: ocrShortcutConfig.value.ctrl,
+      shift: ocrShortcutConfig.value.shift,
+      alt: ocrShortcutConfig.value.alt,
+      meta: ocrShortcutConfig.value.meta,
+      key: ocrShortcutConfig.value.key,
+    }) as string;
 
-    // Réenregistrer les raccourcis globaux avec la nouvelle configuration
-    try {
-      console.log("[saveAllShortcutConfigs] Désenregistrement des raccourcis");
-      await invoke("unregister_global_shortcut");
-    } catch {
-      // Ignorer si le désenregistrement échoue (raccourcis peuvent ne pas être enregistrés)
-      console.log("[saveAllShortcutConfigs] Désenregistrement échoué (ignoré)");
-    }
+    console.log("[saveAllShortcutConfigs] Nouvelle config lecture:", clipboardBindingStr);
+    await invoke("change_binding", { id: "clipboard", binding: clipboardBindingStr });
 
-    console.log("[saveAllShortcutConfigs] Enregistrement des nouveaux raccourcis");
-    await invoke("register_global_shortcut");
+    console.log("[saveAllShortcutConfigs] Nouvelle config OCR:", ocrBindingStr);
+    await invoke("change_binding", { id: "ocr", binding: ocrBindingStr });
+
     showConfig.value = false;
     console.log("[saveAllShortcutConfigs] Terminé");
   } catch (error) {
@@ -251,6 +332,147 @@ async function saveAllShortcutConfigs() {
   }
 }
 
+/**
+ * Convertir le code de la touche (event.code) en format handy-keys
+ * event.code retourne le code physique de la touche, indépendant de la disposition du clavier
+ */
+function get_key_from_code(code: string): string {
+  // Touches numériques
+  if (code.startsWith("Digit")) {
+    return code.replace("Digit", "");
+  }
+  // Touches lettres
+  if (code.startsWith("Key")) {
+    return code.replace("Key", "").toLowerCase();
+  }
+  // Touches numpad
+  if (code.startsWith("Numpad")) {
+    return code.replace("Numpad", "numpad").toLowerCase();
+  }
+  // Touches spéciales - mapper vers les noms handy-keys
+  const specialKeys: Record<string, string> = {
+    Space: "space",
+    Enter: "return",
+    Tab: "tab",
+    Escape: "escape",
+    Backspace: "backspace",
+    Delete: "delete",
+    Insert: "insert",
+    Home: "home",
+    End: "end",
+    PageUp: "pageup",
+    PageDown: "pagedown",
+    ArrowUp: "up",
+    ArrowDown: "down",
+    ArrowLeft: "left",
+    ArrowRight: "right",
+    Minus: "minus",
+    Equal: "equal",
+    BracketLeft: "bracketleft",
+    BracketRight: "bracketright",
+    Backslash: "backslash",
+    Semicolon: "semicolon",
+    Quote: "quote",
+    Comma: "comma",
+    Period: "period",
+    Slash: "slash",
+    Backquote: "backquote",
+  };
+
+  return specialKeys[code] || code.toLowerCase();
+}
+
+/**
+ * Afficher la combinaison complète de manière lisible
+ * Exemple: "Ctrl + Shift + V"
+ */
+function format_shortcut_display(shortcut: ClipboardShortcut): string {
+  const parts: string[] = [];
+  if (shortcut.ctrl) parts.push("Ctrl");
+  if (shortcut.shift) parts.push("Shift");
+  if (shortcut.alt) parts.push("Alt");
+  if (shortcut.meta) parts.push("Super");
+  parts.push(shortcut.key.toUpperCase());
+  return parts.join(" + ");
+}
+
+function format_binding(shortcut: ClipboardShortcut): string {
+  const parts: string[] = [];
+  // handy-keys accepte les touches en minuscules séparées par +
+  if (shortcut.ctrl) parts.push("ctrl");
+  if (shortcut.shift) parts.push("shift");
+  if (shortcut.alt) parts.push("alt");
+  if (shortcut.meta) parts.push("super"); // 'meta' = 'super' dans handy-keys
+
+  // La touche peut être une lettre ou un code spécial
+  let key = shortcut.key.toLowerCase();
+  // Corriger les noms de touches spéciales
+  key = key === "arrowup" ? "up" : key;
+  key = key === "arrowdown" ? "down" : key;
+  key = key === "arrowleft" ? "left" : key;
+  key = key === "arrowright" ? "right" : key;
+  key = key === " " ? "space" : key;
+  key = key === "enter" ? "return" : key;
+
+  parts.push(key);
+  return parts.join("+");
+}
+
+async function toggleRecordingKey(bindingId: string) {
+  if (recordingKey.value) {
+    // Arrêter l'enregistrement et sauvegarder
+    recordingKey.value = false;
+    await saveAllShortcutConfigs();
+  } else {
+    // Commencer l'enregistrement - suspendre le raccourci
+    try {
+      console.log("[toggleRecordingKey] Suspension du raccourci:", bindingId);
+      await invoke("suspend_binding", { id: bindingId });
+      recordingBindingId.value = bindingId;
+      recordingKey.value = true;
+    } catch (error) {
+      console.error("Erreur lors de la suspension du raccourci:", error);
+    }
+  }
+}
+
+async function toggleRecordingOCRKey(bindingId: string) {
+  if (recordingOCRKey.value) {
+    // Arrêter l'enregistrement et sauvegarder
+    recordingOCRKey.value = false;
+    await saveAllShortcutConfigs();
+  } else {
+    // Commencer l'enregistrement - suspendre le raccourci
+    try {
+      console.log("[toggleRecordingOCRKey] Suspension du raccourci:", bindingId);
+      await invoke("suspend_binding", { id: bindingId });
+      recordingOCRBindingId.value = bindingId;
+      recordingOCRKey.value = true;
+    } catch (error) {
+      console.error("Erreur lors de la suspension du raccourci OCR:", error);
+    }
+  }
+}
+
+async function resetShortcutsToDefault() {
+  console.log("[resetShortcutsToDefault] Début");
+  try {
+    console.log("[resetShortcutsToDefault] Réinitialisation des raccourcis par défaut");
+    await invoke("reset_binding", { id: "clipboard" });
+    await invoke("reset_binding", { id: "ocr" });
+
+    console.log("[resetShortcutsToDefault] Rechargement de la configuration");
+    await loadShortcutConfig();
+    await loadOCRShortcutConfig();
+
+    console.log("[resetShortcutsToDefault] Terminé");
+  } catch (error) {
+    console.log("[resetShortcutsToDefault] Erreur:", error);
+    alert(`Erreur lors de la réinitialisation: ${error}`);
+  }
+}
+
+
 onMounted(async () => {
   await loadShortcutConfig();
   await loadOCRShortcutConfig();
@@ -258,7 +480,10 @@ onMounted(async () => {
   await loadSourceLanguage();
   await loadTargetLanguage();
   await loadDevMode();
+  // Écouter keydown pour tracker les modificateurs et déclencher la lecture
   window.addEventListener("keydown", handleKeydown);
+  // Écouter keyup pour l'enregistrement (utilise les modificateurs tracés)
+  window.addEventListener("keyup", handleKeyup);
 
   // Écouter quand la lecture se termine
   try {
@@ -335,14 +560,15 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleKeydown);
+  window.removeEventListener("keydown", handleKeydown as EventListener);
+  window.removeEventListener("keyup", handleKeyup as EventListener);
 });
 </script>
 
 <template>
   <main class="container">
     <div class="clipboard-section">
-      <div class="clipboard-controls">
+      <div class="clipboard-actions">
         <div class="language-controls">
         <button @click="speakSelection" :disabled="isSpeaking" class="speak-btn">
           {{ isSpeaking ? "🔊 Lecture en cours..." : "🔊 Lire" }}
@@ -407,60 +633,73 @@ onUnmounted(() => {
       <div v-if="showConfig" class="shortcut-config-unified">
         <div class="config-section">
           <h3>Raccourci - Lecture</h3>
-          <div class="shortcut-options">
-            <label>
-              <input v-model="shortcutConfig.ctrl" type="checkbox" /> Ctrl
+
+          <div class="modifiers-grid">
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="shortcutConfig.ctrl" />
+              <span>Ctrl</span>
             </label>
-            <label>
-              <input v-model="shortcutConfig.alt" type="checkbox" /> Alt
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="shortcutConfig.shift" />
+              <span>Shift</span>
             </label>
-            <label>
-              <input v-model="shortcutConfig.meta" type="checkbox" /> Super
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="shortcutConfig.alt" />
+              <span>Alt</span>
             </label>
-            <label>
-              <input v-model="shortcutConfig.shift" type="checkbox" /> Shift
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="shortcutConfig.meta" />
+              <span>Super</span>
             </label>
           </div>
+
           <div class="key-input">
             <button
-              @click="recordingKey = !recordingKey"
+              @click="toggleRecordingKey('clipboard')"
               :class="{ recording: recordingKey }"
               class="record-btn"
             >
-              {{ recordingKey ? "Appuyez sur une touche..." : `Touche: ${shortcutConfig.key.toUpperCase()}` }}
+              {{ recordingKey ? "🎹 Appuyez sur une touche..." : `⌨️ Touche: ${shortcutConfig.key.toUpperCase()}` }}
             </button>
           </div>
         </div>
 
         <div class="config-section">
           <h3>Raccourci - OCR</h3>
-          <div class="shortcut-options">
-            <label>
-              <input v-model="ocrShortcutConfig.ctrl" type="checkbox" /> Ctrl
+
+          <div class="modifiers-grid">
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="ocrShortcutConfig.ctrl" />
+              <span>Ctrl</span>
             </label>
-            <label>
-              <input v-model="ocrShortcutConfig.alt" type="checkbox" /> Alt
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="ocrShortcutConfig.shift" />
+              <span>Shift</span>
             </label>
-            <label>
-              <input v-model="ocrShortcutConfig.meta" type="checkbox" /> Super
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="ocrShortcutConfig.alt" />
+              <span>Alt</span>
             </label>
-            <label>
-              <input v-model="ocrShortcutConfig.shift" type="checkbox" /> Shift
+            <label class="modifier-checkbox">
+              <input type="checkbox" v-model="ocrShortcutConfig.meta" />
+              <span>Super</span>
             </label>
           </div>
+
           <div class="key-input">
             <button
-              @click="recordingOCRKey = !recordingOCRKey"
+              @click="toggleRecordingOCRKey('ocr')"
               :class="{ recording: recordingOCRKey }"
               class="record-btn"
             >
-              {{ recordingOCRKey ? "Appuyez sur une touche..." : `Touche: ${ocrShortcutConfig.key.toUpperCase()}` }}
+              {{ recordingOCRKey ? "🎹 Appuyez sur une touche..." : `⌨️ Touche: ${ocrShortcutConfig.key.toUpperCase()}` }}
             </button>
           </div>
         </div>
 
         <div class="config-buttons-unified">
           <button @click="saveAllShortcutConfigs" class="save-btn">Enregistrer</button>
+          <button @click="resetShortcutsToDefault" class="reset-btn">Réinitialiser</button>
           <button @click="showConfig = false" class="cancel-btn">Annuler</button>
         </div>
       </div>
