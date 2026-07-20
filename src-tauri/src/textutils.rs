@@ -9,6 +9,7 @@ use std::path::Path;
 ///
 /// # Exemples
 /// ```
+/// # use gsp_ui_lib::textutils::parse_hashtag;
 /// let text = String::from("#helloWorld");
 /// let result = parse_hashtag(&text);
 /// assert_eq!(result, "#hello World");
@@ -57,6 +58,7 @@ pub fn parse_hashtag(string: &str) -> String {
 ///
 /// # Exemples
 /// ```
+/// # use gsp_ui_lib::textutils::trim_whitespace;
 /// let text = "  a  b  c  ";
 /// let result = trim_whitespace(text);
 /// assert_eq!(result, "a b c");
@@ -79,6 +81,7 @@ pub fn trim_whitespace(string: &str) -> String {
 ///
 /// # Exemples
 /// ```
+/// # use gsp_ui_lib::textutils::remove_special_characters;
 /// let text = "𝐠𝐫𝐚𝐬 et 𝘪𝘵𝘢𝘭𝘪𝘤";
 /// let result = remove_special_characters(text);
 /// assert_eq!(result, "gras et italic");
@@ -96,6 +99,7 @@ pub fn remove_special_characters(string: &str) -> String {
 ///
 /// # Examples
 /// ```
+/// # use gsp_ui_lib::textutils::remove_markdown;
 /// let text = "**Hello World**";
 /// let result = remove_markdown(text);
 /// assert_eq!(result, "Hello World");
@@ -130,6 +134,7 @@ pub fn remove_markdown(string: &str) -> String {
 ///
 /// # Exemples
 /// ```
+/// # use gsp_ui_lib::textutils::read_vars;
 /// let text = "HelloWorld";
 /// let result = read_vars(text);
 /// assert_eq!(result, "Hello World");
@@ -286,6 +291,7 @@ fn create_character_mapping() -> HashMap<char, char> {
 ///
 /// # Exemples
 /// ```
+/// # use gsp_ui_lib::textutils::preprocess_text;
 /// let text = "  #helloWorld  est  𝐠𝐫𝐚𝐬  ";
 /// let result = preprocess_text(text);
 /// assert_eq!(result, "#hello World est gras");

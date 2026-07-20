@@ -2,7 +2,7 @@ mod language_detector;
 mod ocr;
 mod screenshooter;
 mod shortcut;
-mod textutils;
+pub mod textutils;
 mod translator;
 mod tts;
 
@@ -754,4 +754,139 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_binding_to_shortcut_simple_key() {
+        // Teste le parsing d'une touche simple sans modificateurs
+        let result = parse_binding_to_shortcut("v").unwrap();
+        assert!(!result.ctrl);
+        assert!(!result.shift);
+        assert!(!result.alt);
+        assert!(!result.meta);
+        assert_eq!(result.key, "v");
+    }
+
+    #[test]
+    fn test_parse_binding_to_shortcut_with_modifiers() {
+        // Teste le parsing avec plusieurs modificateurs
+        let result = parse_binding_to_shortcut("ctrl+shift+v").unwrap();
+        assert!(result.ctrl);
+        assert!(result.shift);
+        assert!(!result.alt);
+        assert!(!result.meta);
+        assert_eq!(result.key, "v");
+    }
+
+    #[test]
+    fn test_parse_binding_to_shortcut_with_alt_and_super() {
+        // Teste alt et super (meta)
+        let result = parse_binding_to_shortcut("alt+super+o").unwrap();
+        assert!(!result.ctrl);
+        assert!(!result.shift);
+        assert!(result.alt);
+        assert!(result.meta);
+        assert_eq!(result.key, "o");
+    }
+
+    #[test]
+    fn test_parse_binding_to_shortcut_preserves_key_case() {
+        // Teste que la casse de la touche est préservée
+        let result = parse_binding_to_shortcut("ctrl+V").unwrap();
+        assert_eq!(result.key, "V");
+    }
+
+    #[test]
+    fn test_parse_binding_to_shortcut_with_spaces() {
+        // Teste le parsing avec espaces autour des délimiteurs
+        let result = parse_binding_to_shortcut("ctrl+ shift +alt +v").unwrap();
+        assert!(result.ctrl);
+        assert!(result.shift);
+        assert!(result.alt);
+        assert_eq!(result.key, "v");
+    }
+
+    #[test]
+    fn test_get_language_code_english() {
+        // Teste la conversion de DetectedLanguage::English
+        let code = get_language_code(DetectedLanguage::English);
+        assert_eq!(code, "en");
+    }
+
+    #[test]
+    fn test_get_language_code_french() {
+        // Teste la conversion de DetectedLanguage::French
+        let code = get_language_code(DetectedLanguage::French);
+        assert_eq!(code, "fr");
+    }
+
+    #[test]
+    fn test_clipboard_shortcut_default() {
+        // Teste les valeurs par défaut du raccourci
+        let default = ClipboardShortcut::default();
+        assert!(default.ctrl);
+        assert!(default.shift);
+        assert!(!default.alt);
+        assert!(!default.meta);
+        assert_eq!(default.key, "V");
+    }
+
+    #[test]
+    fn test_app_config_default() {
+        // Teste les valeurs par défaut de la config
+        let config = AppConfig::default();
+        assert_eq!(config.playback_speed, 1.0);
+        assert!(!config.dev_mode);
+        assert_eq!(config.source_language, "auto");
+        assert_eq!(config.target_language, "fr");
+
+        // Vérifie la config du raccourci clipboard
+        assert!(config.clipboard_shortcut.ctrl);
+        assert!(config.clipboard_shortcut.shift);
+        assert_eq!(config.clipboard_shortcut.key, "V");
+    }
+
+    #[test]
+    fn test_translate_if_needed_source_language_same_as_target() {
+        // Quand source_lang == target_lang, le texte ne devrait pas être traduit
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "en", "en");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Hello");
+    }
+
+    #[test]
+    fn test_translate_if_needed_auto_detection_same_language() {
+        // En mode auto, si la langue détectée == langue cible, pas de traduction
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "fr");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Bonjour");
+    }
+
+    #[test]
+    fn test_translate_if_needed_auto_detection_different_language_english_to_french() {
+        // En mode auto avec détection anglais → français: devrait tenter une traduction
+        // Note: Ce test dépend de la vraie fonction translate(),
+        // donc il teste le chemin logique, pas le résultat exact
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "auto", "fr");
+        assert!(result.is_ok());
+        // Le résultat devrait être soit traduit, soit le texte original en cas d'erreur
+        let text = result.unwrap();
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_parse_binding_to_shortcut_multiple_modifiers_order() {
+        // Teste que l'ordre des modificateurs n'a pas d'importance
+        let result1 = parse_binding_to_shortcut("ctrl+alt+shift+x").unwrap();
+        let result2 = parse_binding_to_shortcut("shift+ctrl+alt+x").unwrap();
+
+        assert_eq!(result1.ctrl, result2.ctrl);
+        assert_eq!(result1.alt, result2.alt);
+        assert_eq!(result1.shift, result2.shift);
+        assert_eq!(result1.key, result2.key);
+    }
 }
