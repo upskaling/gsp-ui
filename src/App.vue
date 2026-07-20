@@ -439,9 +439,9 @@ onMounted(async () => {
   await loadTargetLanguage();
   await loadDevMode();
   // Écouter keydown pour tracker les modificateurs et déclencher la lecture
-  window.addEventListener("keydown", handleKeydown);
+  window.addEventListener("keydown", handleKeydown as unknown as EventListener);
   // Écouter keyup pour l'enregistrement (utilise les modificateurs tracés)
-  window.addEventListener("keyup", handleKeyup);
+  window.addEventListener("keyup", handleKeyup as unknown as EventListener);
 
   // Écouter quand la lecture se termine
   try {
@@ -518,8 +518,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", handleKeydown as EventListener);
-  window.removeEventListener("keyup", handleKeyup as EventListener);
+  window.removeEventListener("keydown", handleKeydown as unknown as EventListener);
+  window.removeEventListener("keyup", handleKeyup as unknown as EventListener);
 });
 </script>
 

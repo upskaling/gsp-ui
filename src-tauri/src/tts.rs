@@ -62,7 +62,7 @@ impl TtsEngine for EspeakNg {
             .arg("-w")
             .arg(self.output_file.as_str())
             .arg("--")
-            .arg(text.to_string())
+            .arg(text)
             .output();
 
         match result {

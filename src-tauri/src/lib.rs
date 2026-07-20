@@ -489,7 +489,7 @@ fn execute_speech_pipeline(
     {
         let mut sink_guard = CURRENT_SINK.lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
-        if let Some(_) = sink_guard.take() {
+        if sink_guard.take().is_some() {
             debug!(log_tag, "Arrêt de la lecture précédente");
         }
     }

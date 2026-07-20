@@ -1,7 +1,6 @@
 //! Gestion modulée des raccourcis clavier avec support de plusieurs implémentations
 
 pub mod handler;
-pub mod handy_keys;
 pub mod settings;
 mod tauri_impl;
 
@@ -79,9 +78,7 @@ pub fn change_binding(app: AppHandle, id: String, binding: String) -> Result<Bin
     }
 
     // Valider le nouveau raccourci avec tauri
-    if let Err(e) = tauri_impl::validate_shortcut(&binding) {
-        return Err(e);
-    }
+    tauri_impl::validate_shortcut(&binding)?;
 
     // Enregistrer le nouveau raccourci
     if let Err(e) = register_shortcut(&app, &id, &binding) {
