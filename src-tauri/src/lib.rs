@@ -23,8 +23,12 @@ use textutils::{preprocess_text, read_vars};
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
+struct AudioPlayback {
+    player: Player,
+    _device_sink: Box<dyn std::any::Any + Send>,
+}
 
-static CURRENT_SINK: Mutex<Option<Player>> = Mutex::new(None);
+static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
 
 struct PlaybackState {
     _dummy: u8,
@@ -502,24 +506,26 @@ fn execute_speech_pipeline(
     debug!("[{}] Fichier audio généré: {}", log_tag, audio_file_path);
 
     debug!("[{}] Création du stream et sink audio", log_tag);
-    let device_sink = DeviceSinkBuilder::open_default_sink()
+    let mut device_sink = DeviceSinkBuilder::open_default_sink()
         .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
-    let sink = Player::connect_new(device_sink.mixer());
+    device_sink.log_on_drop(false);
+    let player = Player::connect_new(device_sink.mixer());
 
     debug!("[{}] Lecture du fichier: {}", log_tag, audio_file_path);
     let file = std::fs::File::open(&audio_file_path)
         .map_err(|e| format!("Erreur lors de l'ouverture du fichier: {}", e))?;
     let source = Decoder::new(file)
         .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
-    sink.append(source);
+    player.append(source);
 
     {
         let mut sink_guard = CURRENT_SINK.lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
-        *sink_guard = Some(sink);
+        *sink_guard = Some(AudioPlayback {
+            player,
+            _device_sink: Box::new(device_sink),
+        });
     }
-
-    let _ = Box::leak(Box::new(device_sink));
     let app_handle_clone = app_handle.clone();
     debug!("[{}] Lancement du thread d'attente", log_tag);
     std::thread::spawn(move || {
@@ -534,8 +540,8 @@ fn execute_speech_pipeline(
                 }
             };
 
-            if let Some(sink) = sink_guard.as_ref() {
-                if sink.empty() {
+            if let Some(playback) = sink_guard.as_ref() {
+                if playback.player.empty() {
                     debug!("[THREAD] Lecture terminée, émission de playback_finished");
                     if let Some(window) = app_handle_clone.get_webview_window("main") {
                         let _ = window.emit("playback_finished", ());
@@ -663,9 +669,9 @@ fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     let mut sink_guard = CURRENT_SINK.lock()
         .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
 
-    if let Some(sink) = sink_guard.take() {
+    if let Some(playback) = sink_guard.take() {
         debug!("[STOP_SPEAK] Arrêt de la lecture");
-        sink.stop();
+        playback.player.stop();
         debug!("[STOP_SPEAK] Lecture arrêtée");
     } else {
         debug!("[STOP_SPEAK] Aucune lecture en cours");
