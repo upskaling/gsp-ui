@@ -2,11 +2,11 @@
 //!
 //! Implémentation du trait TtsEngine pour eSpeak-NG.
 
-use std::process::{Child, Command};
+use std::process::Command;
 
 /// Trait pour les moteurs de synthèse vocale
 pub trait TtsEngine {
-    fn speak(&self, text: &str) -> Result<Child, String>;
+    fn speak(&self, text: &str) -> Result<String, String>;
     fn set_lang(&mut self, lang: String) -> &mut Self;
     fn set_speed(&mut self, speed: i32) -> &mut Self;
 }
@@ -41,7 +41,7 @@ impl EspeakNg {
 }
 
 impl TtsEngine for EspeakNg {
-    fn speak(&self, text: &str) -> Result<Child, String> {
+    fn speak(&self, text: &str) -> Result<String, String> {
         let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
 
         let voice = if self.lang == "en" {
@@ -75,12 +75,7 @@ impl TtsEngine for EspeakNg {
                 }
 
                 eprintln!("Audio généré: {}", self.output_file);
-                let child = Command::new("paplay")
-                    .arg(self.output_file.as_str())
-                    .spawn()
-                    .map_err(|e| format!("Erreur lors du lancement de paplay: {}", e))?;
-
-                Ok(child)
+                Ok(self.output_file.clone())
             }
             Err(e) => Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e)),
         }

@@ -9,6 +9,7 @@ mod tts;
 use language_detector::{detect_language, DetectedLanguage};
 use log::{error, info};
 use ocr::tesseract;
+use rodio::{Decoder, OutputStream, Sink};
 use serde::{Deserialize, Serialize};
 use screenshooter::xfce4_screenshooter_region;
 use std::path::PathBuf;
@@ -28,8 +29,10 @@ macro_rules! debug {
     };
 }
 
+static CURRENT_SINK: Mutex<Option<Sink>> = Mutex::new(None);
+
 struct PlaybackState {
-    child_pid: Option<u32>,
+    _dummy: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -461,7 +464,7 @@ struct SpeechPipelineInput {
 
 fn execute_speech_pipeline(
     input: SpeechPipelineInput,
-    state: State<Mutex<PlaybackState>>,
+    _state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,
     log_tag: &str,
 ) -> Result<(), String> {
@@ -483,16 +486,13 @@ fn execute_speech_pipeline(
     let text_to_speak =
         translate_if_needed(&cleaned_text, detected_lang, &input.source_lang, &input.target_lang)?;
 
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-
-    if let Some(pid) = playback.child_pid.take() {
-        debug!(log_tag, "Arrêt du processus précédent (PID: {})", pid);
-        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    {
+        let mut sink_guard = CURRENT_SINK.lock()
+            .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
+        if let Some(_) = sink_guard.take() {
+            debug!(log_tag, "Arrêt de la lecture précédente");
+        }
     }
-
-    drop(playback);
 
     debug!(log_tag, "Création du TTS engine");
     let mut tts = EspeakNg::new();
@@ -503,26 +503,56 @@ fn execute_speech_pipeline(
 
     debug!(log_tag, "Vitesse de lecture: {} (espeak: {})", input.playback_speed, espeak_speed);
     debug!(log_tag, "Appel de tts.speak()");
-    let mut child = tts.speak(&text_to_speak)?;
-    let pid = child.id();
-    debug!(log_tag, "Child lancé avec PID: {}", pid);
+    let audio_file_path = tts.speak(&text_to_speak)?;
+    debug!(log_tag, "Fichier audio généré: {}", audio_file_path);
 
+    debug!(log_tag, "Création du stream et sink audio");
+    let (_stream, stream_handle) = OutputStream::try_default()
+        .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
+    let sink = Sink::try_new(&stream_handle)
+        .map_err(|e| format!("Erreur lors de la création du sink: {}", e))?;
+
+    debug!(log_tag, "Lecture du fichier: {}", audio_file_path);
+    let file = std::fs::File::open(&audio_file_path)
+        .map_err(|e| format!("Erreur lors de l'ouverture du fichier: {}", e))?;
+    let source = Decoder::new(file)
+        .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
+    sink.append(source);
+
+    {
+        let mut sink_guard = CURRENT_SINK.lock()
+            .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
+        *sink_guard = Some(sink);
+    }
+
+    let _ = Box::leak(Box::new(_stream));
     let app_handle_clone = app_handle.clone();
     debug!(log_tag, "Lancement du thread d'attente");
     std::thread::spawn(move || {
-        debug!("THREAD", "Attente du processus PID: {}", pid);
-        let _ = child.wait();
-        debug!("THREAD", "Processus terminé, émission de playback_finished");
-        if let Some(window) = app_handle_clone.get_webview_window("main") {
-            let _ = window.emit("playback_finished", ());
+        debug!("THREAD", "Attente de la fin de la lecture");
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let sink_guard = match CURRENT_SINK.lock() {
+                Ok(g) => g,
+                Err(e) => {
+                    debug!("THREAD", "Erreur de verrouillage: {}", e);
+                    break;
+                }
+            };
+
+            if let Some(sink) = sink_guard.as_ref() {
+                if sink.empty() {
+                    debug!("THREAD", "Lecture terminée, émission de playback_finished");
+                    if let Some(window) = app_handle_clone.get_webview_window("main") {
+                        let _ = window.emit("playback_finished", ());
+                    }
+                    break;
+                }
+            }
         }
     });
 
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
-    playback.child_pid = Some(pid);
-    debug!(log_tag, "PID {} stocké dans state", pid);
+    debug!(log_tag, "Sink créé et en cours de lecture");
 
     Ok(())
 }
@@ -634,18 +664,17 @@ fn speak_ocr(
 }
 
 #[tauri::command]
-fn stop_speak(state: State<Mutex<PlaybackState>>) -> Result<(), String> {
+fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     debug!("STOP_SPEAK", "Début de stop_speak()");
-    let mut playback = state
-        .lock()
-        .map_err(|e| format!("Erreur lors du verrouillage de l'état: {}", e))?;
+    let mut sink_guard = CURRENT_SINK.lock()
+        .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
 
-    if let Some(pid) = playback.child_pid.take() {
-        debug!("STOP_SPEAK", "Arrêt du processus PID: {}", pid);
-        let kill_result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-        debug!("STOP_SPEAK", "Résultat de kill: {}", kill_result);
+    if let Some(sink) = sink_guard.take() {
+        debug!("STOP_SPEAK", "Arrêt de la lecture");
+        sink.stop();
+        debug!("STOP_SPEAK", "Lecture arrêtée");
     } else {
-        debug!("STOP_SPEAK", "Aucun processus à arrêter");
+        debug!("STOP_SPEAK", "Aucune lecture en cours");
     }
 
     Ok(())
@@ -708,7 +737,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(Mutex::new(PlaybackState { child_pid: None }))
+        .manage(Mutex::new(PlaybackState { _dummy: 0 }))
         .setup(|app| {
             if let Err(e) = setup_tray(app) {
                 eprintln!("Erreur lors de la création de la tray-icon: {}", e);

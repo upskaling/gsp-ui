@@ -31,6 +31,7 @@ libc = "0.2"
 lingua = { version = "1.7.2", default-features = false, features = ["french", "english"] }
 log = "0.4"
 specta = "1"
+rodio = "0.18"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
