@@ -9,7 +9,7 @@ mod tts;
 use language_detector::{detect_language, DetectedLanguage};
 use log::{debug, error, info};
 use ocr::tesseract;
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, DeviceSinkBuilder, Player};
 use serde::{Deserialize, Serialize};
 use screenshooter::xfce4_screenshooter_region;
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
 
-static CURRENT_SINK: Mutex<Option<Sink>> = Mutex::new(None);
+static CURRENT_SINK: Mutex<Option<Player>> = Mutex::new(None);
 
 struct PlaybackState {
     _dummy: u8,
@@ -502,10 +502,9 @@ fn execute_speech_pipeline(
     debug!("[{}] Fichier audio généré: {}", log_tag, audio_file_path);
 
     debug!("[{}] Création du stream et sink audio", log_tag);
-    let (_stream, stream_handle) = OutputStream::try_default()
+    let device_sink = DeviceSinkBuilder::open_default_sink()
         .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
-    let sink = Sink::try_new(&stream_handle)
-        .map_err(|e| format!("Erreur lors de la création du sink: {}", e))?;
+    let sink = Player::connect_new(device_sink.mixer());
 
     debug!("[{}] Lecture du fichier: {}", log_tag, audio_file_path);
     let file = std::fs::File::open(&audio_file_path)
@@ -520,7 +519,7 @@ fn execute_speech_pipeline(
         *sink_guard = Some(sink);
     }
 
-    let _ = Box::leak(Box::new(_stream));
+    let _ = Box::leak(Box::new(device_sink));
     let app_handle_clone = app_handle.clone();
     debug!("[{}] Lancement du thread d'attente", log_tag);
     std::thread::spawn(move || {
