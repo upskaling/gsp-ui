@@ -2,6 +2,7 @@
 //!
 //! Implémentation du trait TtsEngine pour eSpeak-NG.
 
+use log::debug;
 use std::process::Command;
 
 /// Trait pour les moteurs de synthèse vocale
@@ -74,7 +75,7 @@ impl TtsEngine for EspeakNg {
                     ));
                 }
 
-                eprintln!("Audio généré: {}", self.output_file);
+                debug!("[TTS] Audio généré: {}", self.output_file);
                 Ok(self.output_file.clone())
             }
             Err(e) => Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e)),

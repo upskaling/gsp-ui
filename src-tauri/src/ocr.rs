@@ -2,6 +2,7 @@
 //!
 //! Interface pour l'outil de reconnaissance Tesseract.
 
+use log::error;
 use std::process::{Command, Stdio};
 
 /// Exécute Tesseract OCR sur une image
@@ -32,7 +33,7 @@ pub fn tesseract(screenshooter: &str, lang: &str) -> String {
     {
         Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
         Err(e) => {
-            eprintln!("Erreur lors de l'exécution de Tesseract: {}", e);
+            error!("[OCR] Erreur lors de l'exécution de Tesseract: {}", e);
             String::new()
         }
     }

@@ -30,6 +30,7 @@ dirs = "5"
 libc = "0.2"
 lingua = { version = "1.7.2", default-features = false, features = ["french", "english"] }
 log = "0.4"
+env_filter = "0.1.0"
 specta = "1"
 rodio = "0.18"
 

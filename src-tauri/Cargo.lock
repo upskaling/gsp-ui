@@ -1134,6 +1134,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bf3c259d255ca70051b30e2e95b5446cdb8949ac4cd22c0d7fd634d89f568e2"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1682,6 +1692,7 @@ name = "gsp-ui"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "env_filter",
  "handy-keys",
  "image",
  "libc",

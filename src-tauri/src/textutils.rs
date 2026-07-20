@@ -2,6 +2,7 @@
 //!
 //! Fournit des fonctions pour le nettoyage et le formatage du texte.
 
+use log::warn;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -315,8 +316,8 @@ pub fn replace(text: &str) -> String {
     let replacements = match load_replacements() {
         Ok(map) => map,
         Err(e) => {
-            eprintln!(
-                "Avertissement: impossible de charger le dictionnaire: {}",
+            warn!(
+                "[DICT] Avertissement: impossible de charger le dictionnaire: {}",
                 e
             );
             return text.to_string();

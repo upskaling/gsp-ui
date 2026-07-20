@@ -2,6 +2,7 @@
 //!
 //! Fournit une traduction local en utilisant l'outil translateLocally.
 
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
@@ -124,7 +125,7 @@ pub fn translate(text: &str, lang_from: &str, lang_to: &str) -> Result<String, S
     let _ = command.wait();
 
     if let Some(data) = response.data {
-        eprintln!(
+        info!(
             "[TRANSLATOR] Traduction réussie: {} -> {}",
             lang_from, lang_to
         );

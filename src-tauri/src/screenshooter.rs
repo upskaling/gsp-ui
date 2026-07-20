@@ -2,6 +2,7 @@
 //!
 //! Interface pour l'outil de capture xfce4-screenshooter.
 
+use log::error;
 use std::process::{Command, Stdio};
 
 /// Capture une région de l'écran avec xfce4-screenshooter
@@ -17,8 +18,8 @@ pub fn xfce4_screenshooter_region(screenshooter: &str) {
         .output();
 
     if let Err(e) = result {
-        eprintln!(
-            "Erreur lors de la capture d'écran (xfce4-screenshooter): {}",
+        error!(
+            "[SCREENSHOOTER] Erreur lors de la capture d'écran (xfce4-screenshooter): {}",
             e
         );
     }

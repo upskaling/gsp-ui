@@ -7,7 +7,7 @@ mod translator;
 mod tts;
 
 use language_detector::{detect_language, DetectedLanguage};
-use log::{error, info};
+use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, OutputStream, Sink};
 use serde::{Deserialize, Serialize};
@@ -23,11 +23,6 @@ use textutils::{preprocess_text, read_vars};
 use translator::translate;
 use tts::{EspeakNg, TtsEngine};
 
-macro_rules! debug {
-    ($tag:expr, $($arg:tt)*) => {
-        eprintln!("[{}] {}", $tag, format!($($arg)*))
-    };
-}
 
 static CURRENT_SINK: Mutex<Option<Sink>> = Mutex::new(None);
 
@@ -421,15 +416,15 @@ fn translate_if_needed(
 
     if source_lang == "auto" {
         if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
-            debug!("TRANSLATOR", "Détection automatique: texte en anglais, traduction en français...");
+            debug!("[TRANSLATOR] Détection automatique: texte en anglais, traduction en français...");
             match translate(text, "en", "fr") {
                 Ok(translated) => {
-                    debug!("TRANSLATOR", "Traduction réussie");
+                    debug!("[TRANSLATOR] Traduction réussie");
                     Ok(translated)
                 }
                 Err(e) => {
-                    debug!("TRANSLATOR", "Erreur de traduction: {}", e);
-                    debug!("TRANSLATOR", "Utilisation du texte original");
+                    debug!("[TRANSLATOR] Erreur de traduction: {}", e);
+                    debug!("[TRANSLATOR] Utilisation du texte original");
                     Ok(text.to_string())
                 }
             }
@@ -437,15 +432,15 @@ fn translate_if_needed(
             Ok(text.to_string())
         }
     } else if source_lang != target_lang {
-        debug!("TRANSLATOR", "Traduction de {} en {}...", source_lang, target_lang);
+        debug!("[TRANSLATOR] Traduction de {} en {}...", source_lang, target_lang);
         match translate(text, source_lang, target_lang) {
             Ok(translated) => {
-                debug!("TRANSLATOR", "Traduction réussie");
+                debug!("[TRANSLATOR] Traduction réussie");
                 Ok(translated)
             }
             Err(e) => {
-                debug!("TRANSLATOR", "Erreur de traduction: {}", e);
-                debug!("TRANSLATOR", "Utilisation du texte original");
+                debug!("[TRANSLATOR] Erreur de traduction: {}", e);
+                debug!("[TRANSLATOR] Utilisation du texte original");
                 Ok(text.to_string())
             }
         }
@@ -468,20 +463,20 @@ fn execute_speech_pipeline(
     app_handle: AppHandle,
     log_tag: &str,
 ) -> Result<(), String> {
-    debug!(log_tag, "Début avec texte: {}", input.text);
+    debug!("[{}] Début avec texte: {}", log_tag, input.text);
 
     let text_to_process = if input.dev_mode {
-        debug!(log_tag, "Mode développeur activé, application de read_vars");
+        debug!("[{}] Mode développeur activé, application de read_vars", log_tag);
         read_vars(&input.text)
     } else {
         input.text.clone()
     };
 
     let cleaned_text = preprocess_text(&text_to_process);
-    debug!(log_tag, "Texte nettoyé: {}", cleaned_text);
+    debug!("[{}] Texte nettoyé: {}", log_tag, cleaned_text);
 
     let detected_lang = detect_language(&cleaned_text);
-    debug!(log_tag, "Langue détectée: {:?}", detected_lang);
+    debug!("[{}] Langue détectée: {:?}", log_tag, detected_lang);
 
     let text_to_speak =
         translate_if_needed(&cleaned_text, detected_lang, &input.source_lang, &input.target_lang)?;
@@ -490,29 +485,29 @@ fn execute_speech_pipeline(
         let mut sink_guard = CURRENT_SINK.lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
         if sink_guard.take().is_some() {
-            debug!(log_tag, "Arrêt de la lecture précédente");
+            debug!("[{}] Arrêt de la lecture précédente", log_tag);
         }
     }
 
-    debug!(log_tag, "Création du TTS engine");
+    debug!("[{}] Création du TTS engine", log_tag);
     let mut tts = EspeakNg::new();
     tts.set_lang(input.target_lang.clone());
 
     let espeak_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
     tts.set_speed(espeak_speed);
 
-    debug!(log_tag, "Vitesse de lecture: {} (espeak: {})", input.playback_speed, espeak_speed);
-    debug!(log_tag, "Appel de tts.speak()");
+    debug!("[{}] Vitesse de lecture: {} (espeak: {})", log_tag, input.playback_speed, espeak_speed);
+    debug!("[{}] Appel de tts.speak()", log_tag);
     let audio_file_path = tts.speak(&text_to_speak)?;
-    debug!(log_tag, "Fichier audio généré: {}", audio_file_path);
+    debug!("[{}] Fichier audio généré: {}", log_tag, audio_file_path);
 
-    debug!(log_tag, "Création du stream et sink audio");
+    debug!("[{}] Création du stream et sink audio", log_tag);
     let (_stream, stream_handle) = OutputStream::try_default()
         .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
     let sink = Sink::try_new(&stream_handle)
         .map_err(|e| format!("Erreur lors de la création du sink: {}", e))?;
 
-    debug!(log_tag, "Lecture du fichier: {}", audio_file_path);
+    debug!("[{}] Lecture du fichier: {}", log_tag, audio_file_path);
     let file = std::fs::File::open(&audio_file_path)
         .map_err(|e| format!("Erreur lors de l'ouverture du fichier: {}", e))?;
     let source = Decoder::new(file)
@@ -527,22 +522,22 @@ fn execute_speech_pipeline(
 
     let _ = Box::leak(Box::new(_stream));
     let app_handle_clone = app_handle.clone();
-    debug!(log_tag, "Lancement du thread d'attente");
+    debug!("[{}] Lancement du thread d'attente", log_tag);
     std::thread::spawn(move || {
-        debug!("THREAD", "Attente de la fin de la lecture");
+        debug!("[THREAD] Attente de la fin de la lecture");
         loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
             let sink_guard = match CURRENT_SINK.lock() {
                 Ok(g) => g,
                 Err(e) => {
-                    debug!("THREAD", "Erreur de verrouillage: {}", e);
+                    debug!("[THREAD] Erreur de verrouillage: {}", e);
                     break;
                 }
             };
 
             if let Some(sink) = sink_guard.as_ref() {
                 if sink.empty() {
-                    debug!("THREAD", "Lecture terminée, émission de playback_finished");
+                    debug!("[THREAD] Lecture terminée, émission de playback_finished");
                     if let Some(window) = app_handle_clone.get_webview_window("main") {
                         let _ = window.emit("playback_finished", ());
                     }
@@ -552,7 +547,7 @@ fn execute_speech_pipeline(
         }
     });
 
-    debug!(log_tag, "Sink créé et en cours de lecture");
+    debug!("[{}] Sink créé et en cours de lecture", log_tag);
 
     Ok(())
 }
@@ -595,7 +590,7 @@ fn speak_ocr(
     use std::fs;
     use std::time::SystemTime;
 
-    debug!("SPEAK_OCR", "Début de speak_ocr()");
+    debug!("[SPEAK_OCR] Début de speak_ocr()");
 
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -605,17 +600,17 @@ fn speak_ocr(
     let screenshot_path = format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp);
     let screenshot_path_str = screenshot_path.as_str();
 
-    debug!("SPEAK_OCR", "Chemin de capture: {}", screenshot_path_str);
-    debug!("SPEAK_OCR", "Lancement de xfce4-screenshooter");
+    debug!("[SPEAK_OCR] Chemin de capture: {}", screenshot_path_str);
+    debug!("[SPEAK_OCR] Lancement de xfce4-screenshooter");
 
     xfce4_screenshooter_region(screenshot_path_str);
 
     if !std::path::Path::new(&screenshot_path).exists() {
-        debug!("SPEAK_OCR", "Erreur: le fichier de capture n'a pas été créé");
+        debug!("[SPEAK_OCR] Erreur: le fichier de capture n'a pas été créé");
         return Err("La capture d'écran a échoué".to_string());
     }
 
-    debug!("SPEAK_OCR", "Fichier de capture créé");
+    debug!("[SPEAK_OCR] Fichier de capture créé");
 
     let config = load_config().ok();
     let source_lang = config
@@ -633,16 +628,16 @@ fn speak_ocr(
         _ => "en-GB",
     };
 
-    debug!("SPEAK_OCR", "Exécution de Tesseract avec la langue: {}", tesseract_lang);
+    debug!("[SPEAK_OCR] Exécution de Tesseract avec la langue: {}", tesseract_lang);
     let text = tesseract(screenshot_path_str, tesseract_lang);
 
     if text.is_empty() {
-        debug!("SPEAK_OCR", "Erreur: Tesseract n'a pas reconnu de texte");
+        debug!("[SPEAK_OCR] Erreur: Tesseract n'a pas reconnu de texte");
         let _ = fs::remove_file(&screenshot_path);
         return Err("Aucun texte reconnu par OCR".to_string());
     }
 
-    debug!("SPEAK_OCR", "Texte reconnu: {}", text.chars().take(50).collect::<String>());
+    debug!("[SPEAK_OCR] Texte reconnu: {}", text.chars().take(50).collect::<String>());
 
     let _ = fs::remove_file(&screenshot_path);
 
@@ -665,16 +660,16 @@ fn speak_ocr(
 
 #[tauri::command]
 fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
-    debug!("STOP_SPEAK", "Début de stop_speak()");
+    debug!("[STOP_SPEAK] Début de stop_speak()");
     let mut sink_guard = CURRENT_SINK.lock()
         .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
 
     if let Some(sink) = sink_guard.take() {
-        debug!("STOP_SPEAK", "Arrêt de la lecture");
+        debug!("[STOP_SPEAK] Arrêt de la lecture");
         sink.stop();
-        debug!("STOP_SPEAK", "Lecture arrêtée");
+        debug!("[STOP_SPEAK] Lecture arrêtée");
     } else {
-        debug!("STOP_SPEAK", "Aucune lecture en cours");
+        debug!("[STOP_SPEAK] Aucune lecture en cours");
     }
 
     Ok(())
@@ -687,7 +682,7 @@ fn speak_clipboard(
 ) -> Result<(), String> {
     use x11_clipboard::Clipboard;
 
-    debug!("SPEAK_CLIPBOARD", "Début de speak_clipboard()");
+    debug!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
 
     let clipboard =
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
@@ -707,7 +702,7 @@ fn speak_clipboard(
             String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
         })?;
 
-    debug!("SPEAK_CLIPBOARD", "Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
+    debug!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
 
     let config = load_config().ok();
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);
@@ -740,11 +735,11 @@ pub fn run() {
         .manage(Mutex::new(PlaybackState { _dummy: 0 }))
         .setup(|app| {
             if let Err(e) = setup_tray(app) {
-                eprintln!("Erreur lors de la création de la tray-icon: {}", e);
+                error!("Erreur lors de la création de la tray-icon: {}", e);
             }
 
             if let Err(e) = setup_global_shortcut(app) {
-                eprintln!("Erreur lors de la configuration du raccourci global: {}", e);
+                error!("Erreur lors de la configuration du raccourci global: {}", e);
             }
 
             Ok(())
