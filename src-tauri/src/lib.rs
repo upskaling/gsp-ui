@@ -767,16 +767,44 @@ fn get_clipboard_text() -> Result<String, String> {
         })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn get_clipboard_text() -> Result<String, String> {
     use arboard::Clipboard;
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
 
     let mut clipboard =
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
 
-    clipboard
+    let saved = clipboard.get_text().ok();
+
+    thread::sleep(Duration::from_millis(300));
+
+    let output = Command::new("osascript")
+        .args(["-e", "tell application \"System Events\" to keystroke \"c\" using {command down}"])
+        .output()
+        .map_err(|e| format!("Erreur d'exécution d'osascript: {}", e))?;
+
+    if !output.status.success() {
+        error!("osascript a échoué: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    thread::sleep(Duration::from_millis(100));
+
+    let text = clipboard
         .get_text()
-        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
+        .map_err(|e| format!("Erreur lors de la lecture de la sélection: {}", e))?;
+
+    if saved.as_ref() == Some(&text) {
+        return Err("Aucun texte sélectionné".to_string());
+    }
+
+    if let Some(ref saved_text) = saved {
+        let _ = clipboard.set_text(saved_text);
+    }
+
+    Ok(text)
 }
 
 #[tauri::command]
@@ -786,7 +814,13 @@ fn speak_clipboard(
 ) -> Result<(), String> {
     debug!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
 
-    let text = get_clipboard_text()?;
+    let text = match get_clipboard_text() {
+        Ok(t) => t,
+        Err(e) => {
+            error!("[SPEAK_CLIPBOARD] Erreur get_clipboard_text: {}", e);
+            return Err(e);
+        }
+    };
 
     debug!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
 
