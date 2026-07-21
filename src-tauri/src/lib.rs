@@ -734,14 +734,9 @@ fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn speak_clipboard(
-    state: State<Mutex<PlaybackState>>,
-    app_handle: AppHandle,
-) -> Result<(), String> {
+#[cfg(target_os = "linux")]
+fn get_clipboard_text() -> Result<String, String> {
     use x11_clipboard::Clipboard;
-
-    debug!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
 
     let clipboard =
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
@@ -749,7 +744,7 @@ fn speak_clipboard(
     let atoms = clipboard.getter.atoms.clone();
     let timeout = std::time::Duration::from_secs(1);
 
-    let text = clipboard
+    clipboard
         .load(
             clipboard.setter.atoms.primary,
             atoms.utf8_string,
@@ -759,7 +754,29 @@ fn speak_clipboard(
         .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
         .and_then(|data| {
             String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
-        })?;
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_clipboard_text() -> Result<String, String> {
+    use arboard::Clipboard;
+
+    let mut clipboard =
+        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
+
+    clipboard
+        .get_text()
+        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
+}
+
+#[tauri::command]
+fn speak_clipboard(
+    state: State<Mutex<PlaybackState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    debug!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
+
+    let text = get_clipboard_text()?;
 
     debug!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
 
