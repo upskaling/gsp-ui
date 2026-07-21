@@ -82,7 +82,6 @@ async function speakOCR() {
     console.log("[speakOCR] speak_ocr() terminé");
   } catch (error) {
     console.log("[speakOCR] Erreur:", error);
-    alert(`Erreur OCR: ${error}`);
     isSpeaking.value = false;
   }
 }
