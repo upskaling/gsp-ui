@@ -13,7 +13,7 @@ use rodio::{Decoder, DeviceSinkBuilder, Player};
 use serde::{Deserialize, Serialize};
 use screenshooter::xfce4_screenshooter_region;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -29,6 +29,7 @@ struct AudioPlayback {
 }
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
+static CONFIG_CACHE: Mutex<Option<Arc<AppConfig>>> = Mutex::new(None);
 
 struct PlaybackState {
     _dummy: u8,
@@ -115,16 +116,26 @@ fn get_config_path() -> Result<PathBuf, String> {
 }
 
 fn load_config() -> Result<AppConfig, String> {
+    let mut cache = CONFIG_CACHE.lock()
+        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
+
+    if let Some(cached) = cache.as_ref() {
+        return Ok((**cached).clone());
+    }
+
     let config_path = get_config_path()?;
 
-    if config_path.exists() {
+    let config = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Erreur de lecture du fichier de config: {}", e))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Erreur de parsing du fichier de config: {}", e))
+            .map_err(|e| format!("Erreur de parsing du fichier de config: {}", e))?
     } else {
-        Ok(AppConfig::default())
-    }
+        AppConfig::default()
+    };
+
+    *cache = Some(Arc::new(config.clone()));
+    Ok(config)
 }
 
 fn save_config(config: &AppConfig) -> Result<(), String> {
@@ -132,7 +143,13 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Erreur de sérialisation: {}", e))?;
     std::fs::write(&config_path, content)
-        .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))
+        .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))?;
+
+    let mut cache = CONFIG_CACHE.lock()
+        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
+    *cache = Some(Arc::new(config.clone()));
+
+    Ok(())
 }
 
 fn update_config<F>(f: F) -> Result<(), String>
@@ -530,8 +547,11 @@ fn execute_speech_pipeline(
     debug!("[{}] Lancement du thread d'attente", log_tag);
     std::thread::spawn(move || {
         debug!("[THREAD] Attente de la fin de la lecture");
+        let start = std::time::Instant::now();
+        let max_duration = std::time::Duration::from_secs(600);
+
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
             let sink_guard = match CURRENT_SINK.lock() {
                 Ok(g) => g,
                 Err(e) => {
@@ -548,6 +568,14 @@ fn execute_speech_pipeline(
                     }
                     break;
                 }
+            }
+
+            if start.elapsed() > max_duration {
+                debug!("[THREAD] Timeout après 10 minutes, émission de playback_finished");
+                if let Some(window) = app_handle_clone.get_webview_window("main") {
+                    let _ = window.emit("playback_finished", ());
+                }
+                break;
             }
         }
     });

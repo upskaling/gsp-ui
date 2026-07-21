@@ -49,6 +49,7 @@ const targetLanguageOptions = [
 ];
 const devMode = ref(false);
 let shortcutInProgress = false;
+let unlisten: (() => void)[] = [];
 
 // Tracker pour les touches modificateurs (pour gérer le super+key correctement sur X11)
 const heldModifiers = {
@@ -444,10 +445,11 @@ onMounted(async () => {
 
   // Écouter quand la lecture se termine
   try {
-    await listen("playback_finished", () => {
+    const unlistenPlayback = await listen("playback_finished", () => {
       console.log("[Playback] Événement playback_finished reçu, mise à jour de isSpeaking à false");
       isSpeaking.value = false;
     });
+    unlisten.push(unlistenPlayback);
     console.log("[Playback] Listener playback_finished configuré");
   } catch (error) {
     console.error("[Playback] Erreur lors de la configuration du listener playback_finished:", error);
@@ -455,7 +457,7 @@ onMounted(async () => {
 
   // Écouter l'événement du raccourci global
   try {
-    await listen("global_shortcut_triggered", async () => {
+    const unlistenGlobalShortcut = await listen("global_shortcut_triggered", async () => {
       console.log("[Global Shortcut] Raccourci global reçu! isSpeaking =", isSpeaking.value);
 
       // Ignorer les appels en double si un traitement est en cours
@@ -479,6 +481,7 @@ onMounted(async () => {
       shortcutInProgress = false;
       console.log("[Global Shortcut] Flag réinitialisé");
     });
+    unlisten.push(unlistenGlobalShortcut);
     console.log("[Global Shortcut] Listener du raccourci global configuré");
   } catch (error) {
     console.error("[Global Shortcut] Erreur lors de la configuration du listener:", error);
@@ -486,7 +489,7 @@ onMounted(async () => {
 
   // Écouter l'événement du raccourci OCR
   try {
-    await listen("global_shortcut_ocr_triggered", async () => {
+    const unlistenOCRShortcut = await listen("global_shortcut_ocr_triggered", async () => {
       console.log("[Global Shortcut OCR] Raccourci OCR reçu! isSpeaking =", isSpeaking.value);
 
       // Ignorer les appels en double si un traitement est en cours
@@ -510,6 +513,7 @@ onMounted(async () => {
       shortcutInProgress = false;
       console.log("[Global Shortcut OCR] Flag réinitialisé");
     });
+    unlisten.push(unlistenOCRShortcut);
     console.log("[Global Shortcut OCR] Listener du raccourci OCR configuré");
   } catch (error) {
     console.error("[Global Shortcut OCR] Erreur lors de la configuration du listener:", error);
@@ -519,6 +523,16 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeydown as unknown as EventListener);
   window.removeEventListener("keyup", handleKeyup as unknown as EventListener);
+
+  // Nettoyer tous les listeners Tauri
+  for (const unlistenFn of unlisten) {
+    try {
+      unlistenFn();
+    } catch (error) {
+      console.error("Erreur lors du nettoyage du listener:", error);
+    }
+  }
+  unlisten = [];
 });
 </script>
 
