@@ -1,6 +1,6 @@
-//! Moteur de synthèse vocale eSpeak-NG
+//! Moteurs de synthèse vocale
 //!
-//! Implémentation du trait TtsEngine pour eSpeak-NG.
+//! Utilise eSpeak-NG sur Linux et le moteur TTS intégré (say) sur macOS.
 
 use log::debug;
 use std::process::Command;
@@ -12,7 +12,7 @@ pub trait TtsEngine {
     fn set_speed(&mut self, speed: i32) -> &mut Self;
 }
 
-/// Configuration du moteur eSpeak-NG
+/// Configuration du moteur eSpeak-NG (utilisé sur Linux)
 #[derive(Debug, Clone)]
 pub struct EspeakNg {
     lang: String,
@@ -35,7 +35,6 @@ impl Default for EspeakNg {
 }
 
 impl EspeakNg {
-    /// Crée une nouvelle configuration eSpeak-NG avec des valeurs par défaut
     pub fn new() -> Self {
         Self::default()
     }
@@ -80,6 +79,94 @@ impl TtsEngine for EspeakNg {
             }
             Err(e) => Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e)),
         }
+    }
+
+    fn set_lang(&mut self, lang: String) -> &mut Self {
+        self.lang = lang;
+        self
+    }
+
+    fn set_speed(&mut self, speed: i32) -> &mut Self {
+        self.speed = speed;
+        self
+    }
+}
+
+/// Moteur de synthèse vocale macOS utilisant `say` et `afconvert`.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+pub struct MacOsTts {
+    lang: String,
+    speed: i32,
+}
+
+#[cfg(target_os = "macos")]
+impl Default for MacOsTts {
+    fn default() -> Self {
+        Self {
+            lang: "fr".to_string(),
+            speed: 200,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl MacOsTts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn get_voice(&self) -> &str {
+        match self.lang.as_str() {
+            "en" => "Samantha",
+            _ => "Thomas",
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl TtsEngine for MacOsTts {
+    fn speak(&self, text: &str) -> Result<String, String> {
+        let aiff_path = std::env::temp_dir().join("gsp-ui.aiff");
+        let wav_path = std::env::temp_dir().join("gsp-ui.wav");
+        let aiff_str = aiff_path.to_str().ok_or("Chemin AIFF invalide")?;
+        let wav_str = wav_path.to_str().ok_or("Chemin WAV invalide")?;
+
+        let output = Command::new("say")
+            .arg("-v")
+            .arg(self.get_voice())
+            .arg("-r")
+            .arg(self.speed.to_string())
+            .arg("-o")
+            .arg(aiff_str)
+            .arg(text)
+            .output()
+            .map_err(|e| format!("Erreur say: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("Erreur say: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let convert = Command::new("afconvert")
+            .arg("-f")
+            .arg("WAVE")
+            .arg("-d")
+            .arg("LEI16")
+            .arg(aiff_str)
+            .arg(wav_str)
+            .output()
+            .map_err(|e| format!("Erreur afconvert: {}", e))?;
+
+        if !convert.status.success() {
+            return Err(format!("Erreur afconvert: {}", String::from_utf8_lossy(&convert.stderr)));
+        }
+
+        if let Err(e) = std::fs::remove_file(&aiff_path) {
+            debug!("[TTS] Nettoyage AIFF: {}", e);
+        }
+
+        debug!("[TTS] Audio généré: {}", wav_str);
+        Ok(wav_str.to_string())
     }
 
     fn set_lang(&mut self, lang: String) -> &mut Self {

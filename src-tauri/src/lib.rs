@@ -21,7 +21,11 @@ use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
-use tts::{EspeakNg, TtsEngine};
+#[cfg(target_os = "macos")]
+use tts::MacOsTts;
+#[cfg(target_os = "linux")]
+use tts::EspeakNg;
+use tts::TtsEngine;
 
 struct AudioPlayback {
     player: Player,
@@ -514,13 +518,19 @@ fn execute_speech_pipeline(
     }
 
     debug!("[{}] Création du TTS engine", log_tag);
+    #[cfg(target_os = "macos")]
+    let mut tts = MacOsTts::new();
+    #[cfg(target_os = "linux")]
     let mut tts = EspeakNg::new();
     tts.set_lang(input.target_lang.clone());
 
-    let espeak_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
-    tts.set_speed(espeak_speed);
+    #[cfg(target_os = "macos")]
+    let tts_speed = (input.playback_speed * 200.0) as i32;
+    #[cfg(target_os = "linux")]
+    let tts_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
+    tts.set_speed(tts_speed);
 
-    debug!("[{}] Vitesse de lecture: {} (espeak: {})", log_tag, input.playback_speed, espeak_speed);
+    debug!("[{}] Vitesse de lecture: {} (tts_speed: {})", log_tag, input.playback_speed, tts_speed);
     debug!("[{}] Appel de tts.speak()", log_tag);
     let audio_file_path = tts.speak(&text_to_speak)?;
     debug!("[{}] Fichier audio généré: {}", log_tag, audio_file_path);
