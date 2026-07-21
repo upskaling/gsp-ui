@@ -13,6 +13,7 @@ pub trait TtsEngine {
 }
 
 /// Configuration du moteur eSpeak-NG (utilisé sur Linux)
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
 pub struct EspeakNg {
     lang: String,
@@ -22,6 +23,7 @@ pub struct EspeakNg {
     output_file: String,
 }
 
+#[cfg(target_os = "linux")]
 impl Default for EspeakNg {
     fn default() -> Self {
         Self {
@@ -34,12 +36,14 @@ impl Default for EspeakNg {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl EspeakNg {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
+#[cfg(target_os = "linux")]
 impl TtsEngine for EspeakNg {
     fn speak(&self, text: &str) -> Result<String, String> {
         let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
