@@ -1,25 +1,35 @@
-//! Module de capture d'écran avec xfce4-screenshooter
-//!
-//! Interface pour l'outil de capture xfce4-screenshooter.
-
 use log::error;
 use std::process::{Command, Stdio};
 
-/// Capture une région de l'écran avec xfce4-screenshooter
-///
-/// # Arguments
-/// * `screenshooter` - Chemin où sauvegarder la capture
-pub fn xfce4_screenshooter_region(screenshooter: &str) {
+#[cfg(target_os = "linux")]
+pub fn screenshot_region(path: &str) {
     let result = Command::new("xfce4-screenshooter")
         .arg("--region")
         .arg("--save")
-        .arg(screenshooter)
+        .arg(path)
         .stdout(Stdio::piped())
         .output();
 
     if let Err(e) = result {
         error!(
             "[SCREENSHOOTER] Erreur lors de la capture d'écran (xfce4-screenshooter): {}",
+            e
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn screenshot_region(path: &str) {
+    let result = Command::new("screencapture")
+        .arg("-i")
+        .arg("-r")
+        .arg(path)
+        .stdout(Stdio::piped())
+        .output();
+
+    if let Err(e) = result {
+        error!(
+            "[SCREENSHOOTER] Erreur lors de la capture d'écran (screencapture): {}",
             e
         );
     }

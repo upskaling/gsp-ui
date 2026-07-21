@@ -11,7 +11,7 @@ use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use serde::{Deserialize, Serialize};
-use screenshooter::xfce4_screenshooter_region;
+use screenshooter::screenshot_region;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -666,13 +666,18 @@ fn speak_ocr(
         .map_err(|e| format!("Erreur lors de la récupération du timestamp: {}", e))?
         .as_millis();
 
-    let screenshot_path = format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp);
-    let screenshot_path_str = screenshot_path.as_str();
+    #[cfg(target_os = "linux")]
+    let screenshot_path = std::path::PathBuf::from(format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp));
+
+    #[cfg(target_os = "macos")]
+    let screenshot_path = std::env::temp_dir().join(format!("gsp-ui-screenshot-{}.png", timestamp));
+
+    let screenshot_path_str = screenshot_path.to_str().ok_or("Chemin de capture invalide")?.to_string();
 
     debug!("[SPEAK_OCR] Chemin de capture: {}", screenshot_path_str);
-    debug!("[SPEAK_OCR] Lancement de xfce4-screenshooter");
+    debug!("[SPEAK_OCR] Lancement de la capture d'écran");
 
-    xfce4_screenshooter_region(screenshot_path_str);
+    screenshot_region(&screenshot_path_str);
 
     if !std::path::Path::new(&screenshot_path).exists() {
         debug!("[SPEAK_OCR] Erreur: le fichier de capture n'a pas été créé");
@@ -698,7 +703,7 @@ fn speak_ocr(
     };
 
     debug!("[SPEAK_OCR] Exécution de Tesseract avec la langue: {}", tesseract_lang);
-    let text = tesseract(screenshot_path_str, tesseract_lang);
+    let text = tesseract(&screenshot_path_str, tesseract_lang);
 
     if text.is_empty() {
         debug!("[SPEAK_OCR] Erreur: Tesseract n'a pas reconnu de texte");
