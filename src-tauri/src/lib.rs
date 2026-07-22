@@ -26,9 +26,12 @@ use tts::{EspeakNg, TtsEngine};
 struct AudioPlayback {
     player: Player,
     _device_sink: Box<dyn std::any::Any + Send>,
+    #[allow(dead_code)]
+    thread_id: u128,
 }
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
+static CURRENT_THREAD_ID: Mutex<u128> = Mutex::new(0);
 static CONFIG_CACHE: Mutex<Option<Arc<AppConfig>>> = Mutex::new(None);
 
 struct PlaybackState {
@@ -535,34 +538,57 @@ fn execute_speech_pipeline(
         .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
     player.append(source);
 
+    let thread_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
     {
         let mut sink_guard = CURRENT_SINK.lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
         *sink_guard = Some(AudioPlayback {
             player,
             _device_sink: Box::new(device_sink),
+            thread_id,
         });
     }
+
+    {
+        let mut current_thread_id = CURRENT_THREAD_ID.lock()
+            .map_err(|e| format!("Erreur lors du verrouillage du thread_id: {}", e))?;
+        *current_thread_id = thread_id;
+    }
+
     let app_handle_clone = app_handle.clone();
-    debug!("[{}] Lancement du thread d'attente", log_tag);
+    debug!("[{}] Lancement du thread d'attente (ID: {})", log_tag, thread_id);
     std::thread::spawn(move || {
-        debug!("[THREAD] Attente de la fin de la lecture");
+        debug!("[THREAD#{}] Attente de la fin de la lecture", thread_id);
         let start = std::time::Instant::now();
         let max_duration = std::time::Duration::from_secs(600);
 
         loop {
             std::thread::sleep(std::time::Duration::from_millis(1000));
+
+            let current_id = CURRENT_THREAD_ID.lock()
+                .map(|g| *g)
+                .unwrap_or(0);
+
+            if current_id != thread_id {
+                debug!("[THREAD#{}] Ancien thread détecté (nouveau ID: {}), arrêt", thread_id, current_id);
+                break;
+            }
+
             let sink_guard = match CURRENT_SINK.lock() {
                 Ok(g) => g,
                 Err(e) => {
-                    debug!("[THREAD] Erreur de verrouillage: {}", e);
+                    debug!("[THREAD#{}] Erreur de verrouillage: {}", thread_id, e);
                     break;
                 }
             };
 
             if let Some(playback) = sink_guard.as_ref() {
                 if playback.player.empty() {
-                    debug!("[THREAD] Lecture terminée, émission de playback_finished");
+                    debug!("[THREAD#{}] Lecture terminée, émission de playback_finished", thread_id);
                     if let Some(window) = app_handle_clone.get_webview_window("main") {
                         let _ = window.emit("playback_finished", ());
                     }
@@ -571,7 +597,7 @@ fn execute_speech_pipeline(
             }
 
             if start.elapsed() > max_duration {
-                debug!("[THREAD] Timeout après 10 minutes, émission de playback_finished");
+                debug!("[THREAD#{}] Timeout après 10 minutes, émission de playback_finished", thread_id);
                 if let Some(window) = app_handle_clone.get_webview_window("main") {
                     let _ = window.emit("playback_finished", ());
                 }
