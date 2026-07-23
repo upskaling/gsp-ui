@@ -67,8 +67,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Type check
-        run: pnpm exec vue-tsc --noEmit
-
-      - name: Build
-        run: pnpm run build --skip-app-bundle
+      - name: Type check and build
+        run: pnpm run build
