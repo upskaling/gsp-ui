@@ -12,7 +12,10 @@ pub fn init_shortcuts(app: &AppHandle) {
         Ok(config) => {
             for (id, binding) in config.bindings {
                 if let Err(e) = register_shortcut(app, &id, &binding.current_binding) {
-                    error!("Erreur d'enregistrement du raccourci '{}' au démarrage: {}", id, e);
+                    error!(
+                        "Erreur d'enregistrement du raccourci '{}' au démarrage: {}",
+                        id, e
+                    );
                 }
             }
         }
@@ -32,9 +35,7 @@ pub fn validate_shortcut(raw: &str) -> Result<(), String> {
 
     let parts: Vec<String> = raw.split('+').map(|p| p.trim().to_lowercase()).collect();
 
-    let has_non_modifier = parts
-        .iter()
-        .any(|part| !modifiers.contains(&part.as_str()));
+    let has_non_modifier = parts.iter().any(|part| !modifiers.contains(&part.as_str()));
 
     if has_non_modifier {
         Ok(())
@@ -45,7 +46,11 @@ pub fn validate_shortcut(raw: &str) -> Result<(), String> {
 }
 
 /// Enregistrer un raccourci avec un ID et une chaîne de raccourci
-pub fn register_shortcut(app: &AppHandle, binding_id: &str, shortcut_str: &str) -> Result<(), String> {
+pub fn register_shortcut(
+    app: &AppHandle,
+    binding_id: &str,
+    shortcut_str: &str,
+) -> Result<(), String> {
     if let Err(e) = validate_shortcut(shortcut_str) {
         warn!(
             "Erreur de validation du raccourci '{}' pour '{}': {}",
@@ -102,7 +107,10 @@ pub fn unregister_shortcut(app: &AppHandle, shortcut_str: &str) -> Result<(), St
     };
 
     app.global_shortcut().unregister(shortcut).map_err(|e| {
-        let error_msg = format!("Erreur de désenregistrement du raccourci '{}': {}", shortcut_str, e);
+        let error_msg = format!(
+            "Erreur de désenregistrement du raccourci '{}': {}",
+            shortcut_str, e
+        );
         error!("Erreur de désenregistrement: {}", error_msg);
         error_msg
     })?;

@@ -10,8 +10,8 @@ use language_detector::{detect_language, DetectedLanguage};
 use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
-use serde::{Deserialize, Serialize};
 use screenshooter::screenshot_region;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -21,10 +21,10 @@ use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
-#[cfg(target_os = "macos")]
-use tts::MacOsTts;
 #[cfg(target_os = "linux")]
 use tts::EspeakNg;
+#[cfg(target_os = "macos")]
+use tts::MacOsTts;
 use tts::TtsEngine;
 
 struct AudioPlayback {
@@ -123,7 +123,8 @@ fn get_config_path() -> Result<PathBuf, String> {
 }
 
 fn load_config() -> Result<AppConfig, String> {
-    let mut cache = CONFIG_CACHE.lock()
+    let mut cache = CONFIG_CACHE
+        .lock()
         .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
 
     if let Some(cached) = cache.as_ref() {
@@ -152,7 +153,8 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
     std::fs::write(&config_path, content)
         .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))?;
 
-    let mut cache = CONFIG_CACHE.lock()
+    let mut cache = CONFIG_CACHE
+        .lock()
         .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
     *cache = Some(Arc::new(config.clone()));
 
@@ -210,9 +212,21 @@ fn migrate_old_shortcut_config() -> Result<(), String> {
                 id: "clipboard".to_string(),
                 current_binding: format!(
                     "{}{}{}{}",
-                    if config.clipboard_shortcut.ctrl { "ctrl+" } else { "" },
-                    if config.clipboard_shortcut.shift { "shift+" } else { "" },
-                    if config.clipboard_shortcut.alt { "alt+" } else { "" },
+                    if config.clipboard_shortcut.ctrl {
+                        "ctrl+"
+                    } else {
+                        ""
+                    },
+                    if config.clipboard_shortcut.shift {
+                        "shift+"
+                    } else {
+                        ""
+                    },
+                    if config.clipboard_shortcut.alt {
+                        "alt+"
+                    } else {
+                        ""
+                    },
                     config.clipboard_shortcut.key
                 ),
                 default_binding: "ctrl+shift+v".to_string(),
@@ -225,8 +239,16 @@ fn migrate_old_shortcut_config() -> Result<(), String> {
                 id: "ocr".to_string(),
                 current_binding: format!(
                     "{}{}{}{}",
-                    if config.ocr_shortcut.ctrl { "ctrl+" } else { "" },
-                    if config.ocr_shortcut.shift { "shift+" } else { "" },
+                    if config.ocr_shortcut.ctrl {
+                        "ctrl+"
+                    } else {
+                        ""
+                    },
+                    if config.ocr_shortcut.shift {
+                        "shift+"
+                    } else {
+                        ""
+                    },
                     if config.ocr_shortcut.alt { "alt+" } else { "" },
                     config.ocr_shortcut.key
                 ),
@@ -328,7 +350,10 @@ fn load_ocr_shortcut_config() -> Result<ClipboardShortcut, String> {
 }
 
 #[tauri::command]
-fn save_ocr_shortcut_config(app_handle: AppHandle, shortcut: ClipboardShortcut) -> Result<(), String> {
+fn save_ocr_shortcut_config(
+    app_handle: AppHandle,
+    shortcut: ClipboardShortcut,
+) -> Result<(), String> {
     // Créer la chaîne de raccourci
     let shortcut_str = format!(
         "{}{}{}{}",
@@ -444,7 +469,9 @@ fn translate_if_needed(
 
     if source_lang == "auto" {
         if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
-            debug!("[TRANSLATOR] Détection automatique: texte en anglais, traduction en français...");
+            debug!(
+                "[TRANSLATOR] Détection automatique: texte en anglais, traduction en français..."
+            );
             match translate(text, "en", "fr") {
                 Ok(translated) => {
                     debug!("[TRANSLATOR] Traduction réussie");
@@ -460,7 +487,10 @@ fn translate_if_needed(
             Ok(text.to_string())
         }
     } else if source_lang != target_lang {
-        debug!("[TRANSLATOR] Traduction de {} en {}...", source_lang, target_lang);
+        debug!(
+            "[TRANSLATOR] Traduction de {} en {}...",
+            source_lang, target_lang
+        );
         match translate(text, source_lang, target_lang) {
             Ok(translated) => {
                 debug!("[TRANSLATOR] Traduction réussie");
@@ -494,7 +524,10 @@ fn execute_speech_pipeline(
     debug!("[{}] Début avec texte: {}", log_tag, input.text);
 
     let text_to_process = if input.dev_mode {
-        debug!("[{}] Mode développeur activé, application de read_vars", log_tag);
+        debug!(
+            "[{}] Mode développeur activé, application de read_vars",
+            log_tag
+        );
         read_vars(&input.text)
     } else {
         input.text.clone()
@@ -506,11 +539,16 @@ fn execute_speech_pipeline(
     let detected_lang = detect_language(&cleaned_text);
     debug!("[{}] Langue détectée: {:?}", log_tag, detected_lang);
 
-    let text_to_speak =
-        translate_if_needed(&cleaned_text, detected_lang, &input.source_lang, &input.target_lang)?;
+    let text_to_speak = translate_if_needed(
+        &cleaned_text,
+        detected_lang,
+        &input.source_lang,
+        &input.target_lang,
+    )?;
 
     {
-        let mut sink_guard = CURRENT_SINK.lock()
+        let mut sink_guard = CURRENT_SINK
+            .lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
         if sink_guard.take().is_some() {
             debug!("[{}] Arrêt de la lecture précédente", log_tag);
@@ -530,7 +568,10 @@ fn execute_speech_pipeline(
     let tts_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
     tts.set_speed(tts_speed);
 
-    debug!("[{}] Vitesse de lecture: {} (tts_speed: {})", log_tag, input.playback_speed, tts_speed);
+    debug!(
+        "[{}] Vitesse de lecture: {} (tts_speed: {})",
+        log_tag, input.playback_speed, tts_speed
+    );
     debug!("[{}] Appel de tts.speak()", log_tag);
     let audio_file_path = tts.speak(&text_to_speak)?;
     debug!("[{}] Fichier audio généré: {}", log_tag, audio_file_path);
@@ -554,7 +595,8 @@ fn execute_speech_pipeline(
         .as_millis();
 
     {
-        let mut sink_guard = CURRENT_SINK.lock()
+        let mut sink_guard = CURRENT_SINK
+            .lock()
             .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
         *sink_guard = Some(AudioPlayback {
             player,
@@ -564,13 +606,17 @@ fn execute_speech_pipeline(
     }
 
     {
-        let mut current_thread_id = CURRENT_THREAD_ID.lock()
+        let mut current_thread_id = CURRENT_THREAD_ID
+            .lock()
             .map_err(|e| format!("Erreur lors du verrouillage du thread_id: {}", e))?;
         *current_thread_id = thread_id;
     }
 
     let app_handle_clone = app_handle.clone();
-    debug!("[{}] Lancement du thread d'attente (ID: {})", log_tag, thread_id);
+    debug!(
+        "[{}] Lancement du thread d'attente (ID: {})",
+        log_tag, thread_id
+    );
     std::thread::spawn(move || {
         debug!("[THREAD#{}] Attente de la fin de la lecture", thread_id);
         let start = std::time::Instant::now();
@@ -579,12 +625,13 @@ fn execute_speech_pipeline(
         loop {
             std::thread::sleep(std::time::Duration::from_millis(1000));
 
-            let current_id = CURRENT_THREAD_ID.lock()
-                .map(|g| *g)
-                .unwrap_or(0);
+            let current_id = CURRENT_THREAD_ID.lock().map(|g| *g).unwrap_or(0);
 
             if current_id != thread_id {
-                debug!("[THREAD#{}] Ancien thread détecté (nouveau ID: {}), arrêt", thread_id, current_id);
+                debug!(
+                    "[THREAD#{}] Ancien thread détecté (nouveau ID: {}), arrêt",
+                    thread_id, current_id
+                );
                 break;
             }
 
@@ -598,7 +645,10 @@ fn execute_speech_pipeline(
 
             if let Some(playback) = sink_guard.as_ref() {
                 if playback.player.empty() {
-                    debug!("[THREAD#{}] Lecture terminée, émission de playback_finished", thread_id);
+                    debug!(
+                        "[THREAD#{}] Lecture terminée, émission de playback_finished",
+                        thread_id
+                    );
                     if let Some(window) = app_handle_clone.get_webview_window("main") {
                         let _ = window.emit("playback_finished", ());
                     }
@@ -607,7 +657,10 @@ fn execute_speech_pipeline(
             }
 
             if start.elapsed() > max_duration {
-                debug!("[THREAD#{}] Timeout après 10 minutes, émission de playback_finished", thread_id);
+                debug!(
+                    "[THREAD#{}] Timeout après 10 minutes, émission de playback_finished",
+                    thread_id
+                );
                 if let Some(window) = app_handle_clone.get_webview_window("main") {
                     let _ = window.emit("playback_finished", ());
                 }
@@ -620,7 +673,6 @@ fn execute_speech_pipeline(
 
     Ok(())
 }
-
 
 #[tauri::command]
 fn speak(
@@ -652,10 +704,7 @@ fn speak(
 }
 
 #[tauri::command]
-fn speak_ocr(
-    state: State<Mutex<PlaybackState>>,
-    app_handle: AppHandle,
-) -> Result<(), String> {
+fn speak_ocr(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
     use std::fs;
     use std::time::SystemTime;
 
@@ -667,12 +716,16 @@ fn speak_ocr(
         .as_millis();
 
     #[cfg(target_os = "linux")]
-    let screenshot_path = std::path::PathBuf::from(format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp));
+    let screenshot_path =
+        std::path::PathBuf::from(format!("/dev/shm/gsp-ui-screenshot-{}.png", timestamp));
 
     #[cfg(target_os = "macos")]
     let screenshot_path = std::env::temp_dir().join(format!("gsp-ui-screenshot-{}.png", timestamp));
 
-    let screenshot_path_str = screenshot_path.to_str().ok_or("Chemin de capture invalide")?.to_string();
+    let screenshot_path_str = screenshot_path
+        .to_str()
+        .ok_or("Chemin de capture invalide")?
+        .to_string();
 
     debug!("[SPEAK_OCR] Chemin de capture: {}", screenshot_path_str);
     debug!("[SPEAK_OCR] Lancement de la capture d'écran");
@@ -702,7 +755,10 @@ fn speak_ocr(
         _ => "en-GB",
     };
 
-    debug!("[SPEAK_OCR] Exécution de Tesseract avec la langue: {}", tesseract_lang);
+    debug!(
+        "[SPEAK_OCR] Exécution de Tesseract avec la langue: {}",
+        tesseract_lang
+    );
     let text = tesseract(&screenshot_path_str, tesseract_lang);
 
     if text.is_empty() {
@@ -711,7 +767,10 @@ fn speak_ocr(
         return Err("Aucun texte reconnu par OCR".to_string());
     }
 
-    debug!("[SPEAK_OCR] Texte reconnu: {}", text.chars().take(50).collect::<String>());
+    debug!(
+        "[SPEAK_OCR] Texte reconnu: {}",
+        text.chars().take(50).collect::<String>()
+    );
 
     let _ = fs::remove_file(&screenshot_path);
 
@@ -735,7 +794,8 @@ fn speak_ocr(
 #[tauri::command]
 fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     debug!("[STOP_SPEAK] Début de stop_speak()");
-    let mut sink_guard = CURRENT_SINK.lock()
+    let mut sink_guard = CURRENT_SINK
+        .lock()
         .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
 
     if let Some(playback) = sink_guard.take() {
@@ -787,12 +847,18 @@ fn get_clipboard_text() -> Result<String, String> {
     thread::sleep(Duration::from_millis(300));
 
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\" to keystroke \"c\" using {command down}"])
+        .args([
+            "-e",
+            "tell application \"System Events\" to keystroke \"c\" using {command down}",
+        ])
         .output()
         .map_err(|e| format!("Erreur d'exécution d'osascript: {}", e))?;
 
     if !output.status.success() {
-        error!("osascript a échoué: {}", String::from_utf8_lossy(&output.stderr));
+        error!(
+            "osascript a échoué: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     thread::sleep(Duration::from_millis(100));
@@ -827,7 +893,10 @@ fn speak_clipboard(
         }
     };
 
-    debug!("[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}", text.chars().take(50).collect::<String>());
+    debug!(
+        "[SPEAK_CLIPBOARD] Texte récupéré du presse-papier: {}",
+        text.chars().take(50).collect::<String>()
+    );
 
     let config = load_config().ok();
     let dev_mode = config.as_ref().map(|c| c.dev_mode).unwrap_or(false);

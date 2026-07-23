@@ -49,7 +49,9 @@ fn download_lang(lang: &str) -> bool {
             }
         }
         Err(_) => {
-            let fallback = format!("https://github.com/tesseract-ocr/tessdata_fast/raw/main/{lang}.traineddata");
+            let fallback = format!(
+                "https://github.com/tesseract-ocr/tessdata_fast/raw/main/{lang}.traineddata"
+            );
             match ureq::get(&fallback).call() {
                 Ok(response) => {
                     let mut reader = response.into_reader();

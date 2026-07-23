@@ -19,7 +19,11 @@ pub fn init_shortcuts(app: &AppHandle) {
 }
 
 /// Enregistrer un raccourci
-pub fn register_shortcut(app: &AppHandle, binding_id: &str, shortcut_str: &str) -> Result<(), String> {
+pub fn register_shortcut(
+    app: &AppHandle,
+    binding_id: &str,
+    shortcut_str: &str,
+) -> Result<(), String> {
     // Utiliser l'implémentation tauri
     tauri_impl::register_shortcut(app, binding_id, shortcut_str)
 }
@@ -61,16 +65,22 @@ pub fn get_all_bindings() -> Result<Vec<ShortcutBinding>, String> {
 
 /// Changer un raccourci
 #[tauri::command]
-pub fn change_binding(app: AppHandle, id: String, binding: String) -> Result<BindingResponse, String> {
+pub fn change_binding(
+    app: AppHandle,
+    id: String,
+    binding: String,
+) -> Result<BindingResponse, String> {
     if binding.trim().is_empty() {
         return Err("Le raccourci ne peut pas être vide".to_string());
     }
 
     let mut config = settings::load_shortcut_config()?;
 
-    let existing_binding = config.bindings.get(&id).cloned().ok_or_else(|| {
-        format!("Raccourci '{}' non trouvé", id)
-    })?;
+    let existing_binding = config
+        .bindings
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("Raccourci '{}' non trouvé", id))?;
 
     // Désenregistrer l'ancien raccourci
     if let Err(e) = unregister_shortcut(&app, &existing_binding.current_binding) {
@@ -108,9 +118,11 @@ pub fn change_binding(app: AppHandle, id: String, binding: String) -> Result<Bin
 pub fn reset_binding(app: AppHandle, id: String) -> Result<BindingResponse, String> {
     let config = settings::load_shortcut_config()?;
 
-    let binding = config.bindings.get(&id).cloned().ok_or_else(|| {
-        format!("Raccourci '{}' non trouvé", id)
-    })?;
+    let binding = config
+        .bindings
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("Raccourci '{}' non trouvé", id))?;
 
     change_binding(app, id, binding.default_binding)
 }

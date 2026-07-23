@@ -148,7 +148,10 @@ impl TtsEngine for MacOsTts {
             .map_err(|e| format!("Erreur say: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("Erreur say: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "Erreur say: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let convert = Command::new("afconvert")
@@ -162,7 +165,10 @@ impl TtsEngine for MacOsTts {
             .map_err(|e| format!("Erreur afconvert: {}", e))?;
 
         if !convert.status.success() {
-            return Err(format!("Erreur afconvert: {}", String::from_utf8_lossy(&convert.stderr)));
+            return Err(format!(
+                "Erreur afconvert: {}",
+                String::from_utf8_lossy(&convert.stderr)
+            ));
         }
 
         if let Err(e) = std::fs::remove_file(&aiff_path) {
