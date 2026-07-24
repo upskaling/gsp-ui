@@ -35,7 +35,7 @@ const recordingOCRBindingId = ref<string | null>(null);
 
 const isSpeaking = ref(false);
 const playbackSpeed = ref(1.0);
-const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
+const speedOptions = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const sourceLanguage = ref("auto");
 const targetLanguage = ref("fr");
 const sourceLanguageOptions = [
