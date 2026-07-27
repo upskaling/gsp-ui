@@ -4,8 +4,8 @@ mod ocr;
 mod screenshooter;
 mod shortcut;
 pub mod textutils;
-mod translator;
 mod translation_engine;
+mod translator;
 mod tts;
 
 use language_detector::{detect_language, DetectedLanguage};

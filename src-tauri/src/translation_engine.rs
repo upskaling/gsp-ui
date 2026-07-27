@@ -3,8 +3,10 @@
 //! Utilise LinguaSpark pour la traduction multilingue sans dépendance externe.
 
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use isolang::Language;
 use linguaspark::{DecodeOptions, Executor, Model, ModelAssets, VocabularyAssets};
+use log::{debug, info};
 use std::{
     collections::HashMap,
     fs,
@@ -12,8 +14,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-use log::{debug, info};
-use flate2::read::GzDecoder;
 
 /// Moteur de traduction LinguaSpark
 pub struct TranslationEngine {
@@ -24,10 +24,12 @@ pub struct TranslationEngine {
 impl TranslationEngine {
     /// Crée un nouveau moteur en chargeant les modèles depuis un répertoire
     pub fn load(models_dir: &Path) -> Result<Self> {
-        info!("[TRANSLATION_ENGINE] Chargement des modèles depuis {}", models_dir.display());
+        info!(
+            "[TRANSLATION_ENGINE] Chargement des modèles depuis {}",
+            models_dir.display()
+        );
 
-        let mut directories = fs::read_dir(models_dir)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut directories = fs::read_dir(models_dir)?.collect::<Result<Vec<_>, _>>()?;
         directories.sort_by_key(|entry| entry.file_name());
 
         let mut models = HashMap::new();
@@ -48,7 +50,8 @@ impl TranslationEngine {
             if models.contains_key(&(source, target)) {
                 return Err(anyhow::anyhow!(
                     "Modèle dupliqué pour la paire linguistique '{}-{}'",
-                    source_code, target_code
+                    source_code,
+                    target_code
                 ));
             }
 
@@ -60,13 +63,12 @@ impl TranslationEngine {
             );
 
             let assets = discover_model_assets(&path)?;
-            let model = Model::from_assets(assets)
-                .context(format!(
-                    "Impossible de charger le modèle '{}-{}' depuis '{}'",
-                    source_code,
-                    target_code,
-                    path.display()
-                ))?;
+            let model = Model::from_assets(assets).context(format!(
+                "Impossible de charger le modèle '{}-{}' depuis '{}'",
+                source_code,
+                target_code,
+                path.display()
+            ))?;
 
             models.insert((source, target), model);
         }
@@ -78,10 +80,12 @@ impl TranslationEngine {
             ));
         }
 
-        info!("[TRANSLATION_ENGINE] {} modèles chargés avec succès", models.len());
+        info!(
+            "[TRANSLATION_ENGINE] {} modèles chargés avec succès",
+            models.len()
+        );
 
-        let executor = Executor::new()
-            .context("Impossible de créer l'exécuteur d'inférence")?;
+        let executor = Executor::new().context("Impossible de créer l'exécuteur d'inférence")?;
 
         Ok(Self {
             models: Arc::new(Mutex::new(models)),
@@ -91,12 +95,15 @@ impl TranslationEngine {
 
     /// Traduit un texte d'une langue source vers une langue cible
     pub fn translate(&self, text: &str, from: &str, to: &str) -> Result<String> {
-        debug!("[TRANSLATION_ENGINE] Traduction: {} -> {} | '{}'", from, to, text);
+        debug!(
+            "[TRANSLATION_ENGINE] Traduction: {} -> {} | '{}'",
+            from, to, text
+        );
 
         let source_lang = parse_language_code(from)
             .context(format!("Code de langue source invalide: '{}'", from))?;
-        let target_lang = parse_language_code(to)
-            .context(format!("Code de langue cible invalide: '{}'", to))?;
+        let target_lang =
+            parse_language_code(to).context(format!("Code de langue cible invalide: '{}'", to))?;
 
         // Rechercher le modèle direct en scope limité
         let model_found = {
@@ -153,11 +160,12 @@ fn translate_with_model(executor: &mut Executor, model: &Model, text: &str) -> R
 
 fn parse_language_code(code: &str) -> Result<Language> {
     let normalized = code.split('-').next().unwrap_or(code).to_ascii_lowercase();
-    Language::from_639_1(&normalized)
-        .ok_or_else(|| anyhow::anyhow!(
+    Language::from_639_1(&normalized).ok_or_else(|| {
+        anyhow::anyhow!(
             "Code de langue invalide: '{}'. Format attendu: ISO 639-1",
             code
-        ))
+        )
+    })
 }
 
 fn parse_language_pair(name: &str) -> Result<(Language, Language)> {
@@ -176,22 +184,16 @@ fn parse_language_pair(name: &str) -> Result<(Language, Language)> {
         }
     };
 
-    Ok((
-        parse_language_code(source)?,
-        parse_language_code(target)?,
-    ))
+    Ok((parse_language_code(source)?, parse_language_code(target)?))
 }
 
 fn iso_code(language: &Language) -> Result<&'static str> {
     if language.to_639_3() == "cmn" {
         return Ok("zh");
     }
-    language.to_639_1().ok_or_else(|| {
-        anyhow::anyhow!(
-            "Langue '{}' n'a pas de code ISO 639-1",
-            language
-        )
-    })
+    language
+        .to_639_1()
+        .ok_or_else(|| anyhow::anyhow!("Langue '{}' n'a pas de code ISO 639-1", language))
 }
 
 fn discover_model_assets(model_dir: &Path) -> Result<ModelAssets> {

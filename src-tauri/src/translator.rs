@@ -3,8 +3,8 @@
 //! Fournit une traduction locale en utilisant le moteur LinguaSpark (multilingue).
 //! Les modèles sont téléchargés automatiquement si manquants.
 
-use crate::translation_engine::TranslationEngine;
 use crate::model_downloader;
+use crate::translation_engine::TranslationEngine;
 use log::info;
 use std::sync::OnceLock;
 
@@ -26,7 +26,10 @@ pub fn initialize_engine() -> Result<(), String> {
     let models_dir = model_downloader::initialize_models()
         .map_err(|e| format!("Erreur lors de l'initialisation des modèles: {}", e))?;
 
-    info!("[TRANSLATOR] Modèles stockés dans: {}", models_dir.display());
+    info!(
+        "[TRANSLATOR] Modèles stockés dans: {}",
+        models_dir.display()
+    );
 
     if !models_dir.exists() {
         return Err(format!(
@@ -62,7 +65,8 @@ pub fn initialize_engine() -> Result<(), String> {
 /// # Retour
 /// Retourne le texte traduit ou une erreur
 pub fn translate(text: &str, lang_from: &str, lang_to: &str) -> Result<String, String> {
-    let engine = TRANSLATION_ENGINE.get()
+    let engine = TRANSLATION_ENGINE
+        .get()
         .ok_or_else(|| "Moteur de traduction non initialisé".to_string())?;
 
     engine
