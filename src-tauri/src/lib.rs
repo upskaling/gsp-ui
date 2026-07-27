@@ -1,9 +1,11 @@
 mod language_detector;
+mod model_downloader;
 mod ocr;
 mod screenshooter;
 mod shortcut;
 pub mod textutils;
 mod translator;
+mod translation_engine;
 mod tts;
 
 use language_detector::{detect_language, DetectedLanguage};
@@ -929,6 +931,15 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Mutex::new(PlaybackState { _dummy: 0 }))
         .setup(|app| {
+            // Initialiser le moteur de traduction en arrière-plan (non-bloquant)
+            std::thread::spawn(|| {
+                info!("[SETUP] Initialisation du moteur de traduction en arrière-plan...");
+                match translator::initialize_engine() {
+                    Ok(_) => info!("[SETUP] Moteur de traduction initialisé avec succès"),
+                    Err(e) => info!("[SETUP] Moteur de traduction non disponible: {}", e),
+                }
+            });
+
             if let Err(e) = setup_tray(app) {
                 error!("Erreur lors de la création de la tray-icon: {}", e);
             }

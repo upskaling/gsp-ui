@@ -1,50 +1,55 @@
-//! Traduction locale avec translateLocally
+//! Traduction locale avec LinguaSpark
 //!
-//! Fournit une traduction local en utilisant l'outil translateLocally.
+//! Fournit une traduction locale en utilisant le moteur LinguaSpark (multilingue).
+//! Les modèles sont téléchargés automatiquement si manquants.
 
+use crate::translation_engine::TranslationEngine;
+use crate::model_downloader;
 use log::info;
-use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TranslateRequest {
-    id: i32,
-    command: String,
-    data: TranslateRequestData,
-}
+static TRANSLATION_ENGINE: OnceLock<TranslationEngine> = OnceLock::new();
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TranslateRequestData {
-    src: String,
-    trg: String,
-    text: String,
-}
+/// Initialise le moteur de traduction
+/// Doit être appelé avant toute traduction
+///
+/// # Comportement
+/// - Crée le répertoire des modèles s'il n'existe pas
+/// - Télécharge les modèles par défaut (en-fr, fr-en) si absent
+/// - Initialise le moteur LinguaSpark
+pub fn initialize_engine() -> Result<(), String> {
+    if TRANSLATION_ENGINE.get().is_some() {
+        return Ok(());
+    }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TranslateResponse {
-    id: i32,
-    success: bool,
-    data: Option<TranslateResponseData>,
-}
+    // Initialiser les modèles (créer répertoire + télécharger si besoin)
+    let models_dir = model_downloader::initialize_models()
+        .map_err(|e| format!("Erreur lors de l'initialisation des modèles: {}", e))?;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TranslateResponseData {
-    target: TranslateResponseTargetData,
-}
+    info!("[TRANSLATOR] Modèles stockés dans: {}", models_dir.display());
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TranslateResponseTargetData {
-    text: String,
-}
+    if !models_dir.exists() {
+        return Err(format!(
+            "Répertoire des modèles n'existe pas: {}",
+            models_dir.display()
+        ));
+    }
 
-/// Vérifie si la commande translateLocally est disponible
-fn command_exists(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    // Essayer de charger les modèles disponibles
+    match TranslationEngine::load(&models_dir) {
+        Ok(engine) => {
+            TRANSLATION_ENGINE.get_or_init(|| engine);
+            info!("[TRANSLATOR] Moteur de traduction initialisé avec succès");
+            Ok(())
+        }
+        Err(e) => {
+            // L'app fonctionne sans traduction, ce n'est pas critique
+            Err(format!(
+                "Moteur de traduction non disponible: {}. L'app fonctionnera sans traduction.",
+                e
+            ))
+        }
+    }
 }
 
 /// Traduit un texte d'une langue source vers une langue cible
@@ -57,137 +62,10 @@ fn command_exists(cmd: &str) -> bool {
 /// # Retour
 /// Retourne le texte traduit ou une erreur
 pub fn translate(text: &str, lang_from: &str, lang_to: &str) -> Result<String, String> {
-    if !command_exists("translateLocally") {
-        return Err("translateLocally n'est pas disponible".to_string());
-    }
+    let engine = TRANSLATION_ENGINE.get()
+        .ok_or_else(|| "Moteur de traduction non initialisé".to_string())?;
 
-    let mut command = Command::new("translateLocally")
-        .arg("-p")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Erreur lors du lancement de translateLocally: {}", e))?;
-
-    let mut stdin = command
-        .stdin
-        .take()
-        .ok_or("Erreur: impossible d'ouvrir stdin")?;
-    let mut stdout = command
-        .stdout
-        .take()
-        .ok_or("Erreur: impossible d'ouvrir stdout")?;
-
-    let request = TranslateRequest {
-        id: 1,
-        command: "Translate".to_string(),
-        data: TranslateRequestData {
-            src: lang_from[..2.min(lang_from.len())].to_string(),
-            trg: lang_to[..2.min(lang_to.len())].to_string(),
-            text: text.to_string(),
-        },
-    };
-
-    let request_bytes = serde_json::to_vec(&request)
-        .map_err(|e| format!("Erreur de sérialisation de la requête: {}", e))?;
-
-    let length = (request_bytes.len() as u32).to_ne_bytes();
-
-    stdin
-        .write_all(&length)
-        .map_err(|e| format!("Erreur lors de l'écriture de la longueur: {}", e))?;
-
-    stdin
-        .write_all(&request_bytes)
-        .map_err(|e| format!("Erreur lors de l'écriture de la requête: {}", e))?;
-
-    // Fermer stdin pour indiquer que nous avons fini d'écrire
-    drop(stdin);
-
-    let mut response_len = [0u8; 4];
-    stdout.read_exact(&mut response_len).map_err(|e| {
-        format!(
-            "Erreur lors de la lecture de la longueur de la réponse: {}",
-            e
-        )
-    })?;
-
-    let response_len = u32::from_ne_bytes(response_len);
-
-    let mut response_bytes = vec![0u8; response_len as usize];
-    stdout
-        .read_exact(&mut response_bytes)
-        .map_err(|e| format!("Erreur lors de la lecture de la réponse: {}", e))?;
-
-    let response = serde_json::from_slice::<TranslateResponse>(&response_bytes)
-        .map_err(|e| format!("Erreur de désérialisation de la réponse: {}", e))?;
-
-    // Attendre que le processus se termine proprement
-    let _ = command.wait();
-
-    if let Some(data) = response.data {
-        info!(
-            "[TRANSLATOR] Traduction réussie: {} -> {}",
-            lang_from, lang_to
-        );
-        Ok(data.target.text)
-    } else {
-        Err("La réponse ne contient pas de données de traduction".to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_translate_request_serialization() {
-        let request = TranslateRequest {
-            id: 1,
-            command: "Translate".to_string(),
-            data: TranslateRequestData {
-                src: "en".to_string(),
-                trg: "fr".to_string(),
-                text: "Hello".to_string(),
-            },
-        };
-
-        let serialized = serde_json::to_string(&request).unwrap();
-        let expected =
-            r#"{"id":1,"command":"Translate","data":{"src":"en","trg":"fr","text":"Hello"}}"#;
-        assert_eq!(serialized, expected);
-    }
-
-    #[test]
-    fn test_translate_response_deserialization() {
-        let json_data = r#"
-        {
-            "id": 1,
-            "success": true,
-            "data": {
-                "target": {
-                    "text": "Bonjour"
-                }
-            }
-        }"#;
-
-        let response: TranslateResponse = serde_json::from_str(json_data).unwrap();
-        assert_eq!(response.id, 1);
-        assert!(response.success);
-        assert_eq!(response.data.unwrap().target.text, "Bonjour");
-    }
-
-    #[test]
-    fn test_translate_response_no_data() {
-        let json_data = r#"
-        {
-            "id": 1,
-            "success": false,
-            "data": null
-        }"#;
-
-        let response: TranslateResponse = serde_json::from_str(json_data).unwrap();
-        assert_eq!(response.id, 1);
-        assert!(!response.success);
-        assert!(response.data.is_none());
-    }
+    engine
+        .translate(text, lang_from, lang_to)
+        .map_err(|e| format!("Erreur de traduction: {}", e))
 }
