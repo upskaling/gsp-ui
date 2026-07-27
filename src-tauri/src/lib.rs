@@ -849,47 +849,59 @@ fn get_clipboard_text() -> Result<String, String> {
 #[cfg(target_os = "macos")]
 fn get_clipboard_text() -> Result<String, String> {
     use arboard::Clipboard;
-    use std::process::Command;
     use std::thread;
     use std::time::Duration;
 
-    let mut clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
+    let mut clipboard = Clipboard::new()
+        .map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
 
-    let saved = clipboard.get_text().ok();
+    let saved_text = clipboard.get_text().ok();
 
-    thread::sleep(Duration::from_millis(300));
+    simulate_cmd_c()?;
 
-    let output = Command::new("osascript")
-        .args([
-            "-e",
-            "tell application \"System Events\" to keystroke \"c\" using {command down}",
-        ])
-        .output()
-        .map_err(|e| format!("Erreur d'exécution d'osascript: {}", e))?;
+    for _ in 0..50 {
+        thread::sleep(Duration::from_millis(10));
 
-    if !output.status.success() {
-        error!(
-            "osascript a échoué: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        if let Ok(text) = clipboard.get_text() {
+            if saved_text.as_ref() != Some(&text) && !text.is_empty() {
+                if let Some(ref saved) = saved_text {
+                    let _ = clipboard.set_text(saved);
+                }
+                return Ok(text);
+            }
+        }
     }
 
-    thread::sleep(Duration::from_millis(100));
+    Err("Impossible de récupérer le texte sélectionné".to_string())
+}
 
-    let text = clipboard
-        .get_text()
-        .map_err(|e| format!("Erreur lors de la lecture de la sélection: {}", e))?;
+#[cfg(target_os = "macos")]
+fn simulate_cmd_c() -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGKeyCode};
+    use core_graphics::event::CGEventTapLocation;
+    use core_graphics::event::CGEventFlags;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use std::thread;
+    use std::time::Duration;
 
-    if saved.as_ref() == Some(&text) {
-        return Err("Aucun texte sélectionné".to_string());
-    }
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+        .map_err(|_| "Impossible de créer la source d'événement".to_string())?;
 
-    if let Some(ref saved_text) = saved {
-        let _ = clipboard.set_text(saved_text);
-    }
+    let keycode: CGKeyCode = 8;
 
-    Ok(text)
+    let down = CGEvent::new_keyboard_event(source.clone(), keycode, true)
+        .map_err(|_| "Erreur création événement clavier down".to_string())?;
+    down.set_flags(CGEventFlags::CGEventFlagCommand);
+    down.post(CGEventTapLocation::HID);
+
+    thread::sleep(Duration::from_millis(5));
+
+    let up = CGEvent::new_keyboard_event(source, keycode, false)
+        .map_err(|_| "Erreur création événement clavier up".to_string())?;
+    up.set_flags(CGEventFlags::CGEventFlagCommand);
+    up.post(CGEventTapLocation::HID);
+
+    Ok(())
 }
 
 #[tauri::command]
