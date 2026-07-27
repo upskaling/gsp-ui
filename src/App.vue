@@ -48,6 +48,9 @@ const targetLanguageOptions = [
   { code: "en", label: "English" }
 ];
 const devMode = ref(false);
+const showModelsPage = ref(false);
+const models = ref<Array<{ name: string; size_mb: number }>>([]);
+const loadingModels = ref(false);
 let shortcutInProgress = false;
 let unlisten: (() => void)[] = [];
 
@@ -430,6 +433,37 @@ async function resetShortcutsToDefault() {
   }
 }
 
+async function loadModels() {
+  loadingModels.value = true;
+  try {
+    console.log("[loadModels] Chargement de la liste des modèles");
+    const modelList = await invoke("list_models");
+    models.value = modelList as Array<{ name: string; size_mb: number }>;
+    console.log("[loadModels] Modèles chargés:", models.value);
+  } catch (error) {
+    console.error("[loadModels] Erreur:", error);
+    alert(`Erreur lors du chargement des modèles: ${error}`);
+  } finally {
+    loadingModels.value = false;
+  }
+}
+
+async function deleteModelAction(modelName: string) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer le modèle "${modelName}" ?`)) {
+    return;
+  }
+
+  try {
+    console.log("[deleteModelAction] Suppression du modèle:", modelName);
+    await invoke("delete_model", { modelName });
+    console.log("[deleteModelAction] Modèle supprimé");
+    await loadModels();
+  } catch (error) {
+    console.error("[deleteModelAction] Erreur:", error);
+    alert(`Erreur lors de la suppression: ${error}`);
+  }
+}
+
 
 onMounted(async () => {
   await loadShortcutConfig();
@@ -438,6 +472,7 @@ onMounted(async () => {
   await loadSourceLanguage();
   await loadTargetLanguage();
   await loadDevMode();
+  await loadModels();
   // Écouter keydown pour tracker les modificateurs et déclencher la lecture
   window.addEventListener("keydown", handleKeydown as unknown as EventListener);
   // Écouter keyup pour l'enregistrement (utilise les modificateurs tracés)
@@ -598,6 +633,9 @@ onUnmounted(() => {
         <button @click="showConfig = !showConfig" class="config-btn">
           ⚙️ Configurer
         </button>
+        <button @click="showModelsPage = !showModelsPage" class="models-btn">
+          📦 Modèles
+        </button>
         <label class="dev-mode-toggle">
           <input type="checkbox" v-model="devMode" @change="toggleDevMode" />
           🧪 Dev
@@ -675,6 +713,50 @@ onUnmounted(() => {
           <button @click="saveAllShortcutConfigs" class="save-btn">Enregistrer</button>
           <button @click="resetShortcutsToDefault" class="reset-btn">Réinitialiser</button>
           <button @click="showConfig = false" class="cancel-btn">Annuler</button>
+        </div>
+      </div>
+
+      <div v-if="showModelsPage" class="models-page">
+        <h3>Modèles de traduction</h3>
+
+        <div v-if="loadingModels" class="loading">
+          ⏳ Chargement des modèles...
+        </div>
+
+        <div v-else-if="models.length === 0" class="no-models">
+          <p>Aucun modèle installé</p>
+        </div>
+
+        <div v-else class="models-table-container">
+          <table class="models-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Taille</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in models" :key="model.name">
+                <td class="model-name">{{ model.name }}</td>
+                <td class="model-size">{{ model.size_mb.toFixed(2) }} MB</td>
+                <td class="model-action">
+                  <button
+                    @click="deleteModelAction(model.name)"
+                    class="delete-btn"
+                    title="Supprimer ce modèle"
+                  >
+                    🗑️ Supprimer
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="models-page-buttons">
+          <button @click="loadModels" class="refresh-btn">🔄 Actualiser</button>
+          <button @click="showModelsPage = false" class="close-btn">Fermer</button>
         </div>
       </div>
 

@@ -133,6 +133,84 @@ fn is_valid_model_dir(path: &PathBuf) -> bool {
     false
 }
 
+/// Modèle avec ses informations (nom, taille)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelInfo {
+    pub name: String,
+    pub size_mb: f64,
+}
+
+/// Liste tous les modèles disponibles avec leur taille
+pub fn list_available_models() -> Result<Vec<ModelInfo>> {
+    let models_dir = get_models_dir();
+    let mut models = Vec::new();
+
+    if !models_dir.exists() {
+        return Ok(models);
+    }
+
+    for entry in fs::read_dir(&models_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            // Vérifier si c'est un modèle valide
+            if is_valid_model_dir(&path) {
+                if let Ok(name) = entry.file_name().into_string() {
+                    if let Ok(size) = calculate_dir_size(&path) {
+                        let size_mb = size as f64 / (1024.0 * 1024.0);
+                        models.push(ModelInfo { name, size_mb });
+                    }
+                }
+            }
+        }
+    }
+
+    // Trier par nom
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(models)
+}
+
+/// Calcule la taille totale d'un répertoire en bytes
+fn calculate_dir_size(path: &PathBuf) -> Result<u64> {
+    let mut total = 0u64;
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Ok(metadata) = fs::metadata(&path) {
+                total += metadata.len();
+            }
+        }
+    }
+
+    Ok(total)
+}
+
+/// Supprime un modèle par son nom
+pub fn delete_model(model_name: &str) -> Result<()> {
+    let models_dir = get_models_dir();
+    let model_path = models_dir.join(model_name);
+
+    if !model_path.exists() {
+        return Err(anyhow::anyhow!("Le modèle '{}' n'existe pas", model_name));
+    }
+
+    if !model_path.is_dir() {
+        return Err(anyhow::anyhow!(
+            "'{}' n'est pas un répertoire valide",
+            model_name
+        ));
+    }
+
+    info!("[MODEL_DOWNLOADER] Suppression du modèle: {}", model_name);
+    fs::remove_dir_all(&model_path)
+        .context(format!("Impossible de supprimer le modèle: {}", model_name))?;
+
+    info!("[MODEL_DOWNLOADER] Modèle '{}' supprimé avec succès", model_name);
+    Ok(())
+}
+
 /// Télécharge les modèles par défaut (en-fr, fr-en) via HTTP
 fn download_default_models(models_dir: &PathBuf) -> Result<()> {
     info!("[MODEL_DOWNLOADER] Tentative de téléchargement des modèles par défaut...");

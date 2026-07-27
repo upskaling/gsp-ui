@@ -454,6 +454,18 @@ fn reset_shortcuts_to_default() -> Result<(), String> {
     })
 }
 
+#[tauri::command]
+fn list_models() -> Result<Vec<model_downloader::ModelInfo>, String> {
+    model_downloader::list_available_models()
+        .map_err(|e| format!("Erreur lors de la récupération des modèles: {}", e))
+}
+
+#[tauri::command]
+fn delete_model(model_name: String) -> Result<(), String> {
+    model_downloader::delete_model(&model_name)
+        .map_err(|e| format!("Erreur lors de la suppression du modèle: {}", e))
+}
+
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
     match detected_lang {
         DetectedLanguage::English => "en",
@@ -980,7 +992,9 @@ pub fn run() {
             speak,
             stop_speak,
             speak_clipboard,
-            speak_ocr
+            speak_ocr,
+            list_models,
+            delete_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

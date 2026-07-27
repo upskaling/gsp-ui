@@ -45,6 +45,11 @@
   padding: 0.5em 1em;
 }
 
+.models-btn {
+  font-size: 0.9em;
+  padding: 0.5em 1em;
+}
+
 .speak-btn {
   font-size: 0.9em;
   padding: 0.5em 1em;
@@ -246,6 +251,123 @@
   padding: 0;
   width: auto;
   height: auto;
+}
+
+.models-page {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f5f5f5;
+}
+
+.models-page h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1em;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-style: italic;
+}
+
+.no-models {
+  text-align: center;
+  padding: 2rem;
+  color: #999;
+}
+
+.models-table-container {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.models-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #ffffff;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.models-table thead {
+  background-color: #e9ecef;
+  border-bottom: 2px solid #ddd;
+}
+
+.models-table th {
+  padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid #ddd;
+}
+
+.models-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #eee;
+}
+
+.models-table tbody tr:hover {
+  background-color: #f9f9f9;
+}
+
+.model-name {
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.model-size {
+  text-align: right;
+  color: #666;
+}
+
+.model-action {
+  text-align: center;
+}
+
+.delete-btn {
+  background-color: #dc3545;
+  color: white;
+  border-color: #dc3545;
+  padding: 0.4em 0.8em;
+  font-size: 0.85em;
+}
+
+.delete-btn:hover {
+  background-color: #c82333;
+  border-color: #c82333;
+}
+
+.models-page-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.refresh-btn {
+  background-color: #0066cc;
+  color: white;
+  border-color: #0066cc;
+}
+
+.refresh-btn:hover {
+  background-color: #0052a3;
+  border-color: #0052a3;
+}
+
+.close-btn {
+  background-color: #6c757d;
+  color: white;
+  border-color: #6c757d;
+}
+
+.close-btn:hover {
+  background-color: #5a6268;
+  border-color: #5a6268;
 }
 
 .shortcut-config-unified {
@@ -508,6 +630,70 @@ button {
 
   .language-select:hover {
     border-color: #24c8db;
+  }
+
+  .models-page {
+    border-color: #444;
+    background-color: #1f1f1f;
+  }
+
+  .models-table {
+    background-color: #0f0f0f98;
+    color: #f6f6f6;
+  }
+
+  .models-table thead {
+    background-color: #2a2a3a;
+    border-bottom-color: #444;
+  }
+
+  .models-table th {
+    color: #f6f6f6;
+    border-bottom-color: #444;
+  }
+
+  .models-table td {
+    border-bottom-color: #333;
+  }
+
+  .models-table tbody tr:hover {
+    background-color: #1a1a2a;
+  }
+
+  .model-size {
+    color: #aaa;
+  }
+
+  .delete-btn {
+    background-color: #dc3545;
+  }
+
+  .delete-btn:hover {
+    background-color: #c82333;
+  }
+
+  .refresh-btn {
+    background-color: #0066cc;
+  }
+
+  .refresh-btn:hover {
+    background-color: #0052a3;
+  }
+
+  .close-btn {
+    background-color: #6c757d;
+  }
+
+  .close-btn:hover {
+    background-color: #5a6268;
+  }
+
+  .loading {
+    color: #aaa;
+  }
+
+  .no-models {
+    color: #666;
   }
 }
 
