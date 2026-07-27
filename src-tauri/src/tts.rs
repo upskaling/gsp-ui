@@ -8,8 +8,8 @@ use std::process::Command;
 /// Trait pour les moteurs de synthèse vocale
 pub trait TtsEngine {
     fn speak(&self, text: &str) -> Result<String, String>;
-    fn set_lang(&mut self, lang: String) -> &mut Self;
-    fn set_speed(&mut self, speed: i32) -> &mut Self;
+    fn set_lang(&mut self, lang: String);
+    fn set_speed(&mut self, speed: i32);
 }
 
 /// Configuration du moteur eSpeak-NG (utilisé sur Linux)
@@ -85,14 +85,12 @@ impl TtsEngine for EspeakNg {
         }
     }
 
-    fn set_lang(&mut self, lang: String) -> &mut Self {
+    fn set_lang(&mut self, lang: String) {
         self.lang = lang;
-        self
     }
 
-    fn set_speed(&mut self, speed: i32) -> &mut Self {
+    fn set_speed(&mut self, speed: i32) {
         self.speed = speed;
-        self
     }
 }
 
@@ -179,13 +177,35 @@ impl TtsEngine for MacOsTts {
         Ok(wav_str.to_string())
     }
 
-    fn set_lang(&mut self, lang: String) -> &mut Self {
+    fn set_lang(&mut self, lang: String) {
         self.lang = lang;
-        self
     }
 
-    fn set_speed(&mut self, speed: i32) -> &mut Self {
+    fn set_speed(&mut self, speed: i32) {
         self.speed = speed;
-        self
+    }
+}
+
+/// Crée une instance du moteur TTS appropriée à la plateforme
+pub fn create_tts_engine() -> Box<dyn TtsEngine> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacOsTts::new())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(EspeakNg::new())
+    }
+}
+
+/// Convertit la vitesse de lecture frontend en valeur TTS selon la plateforme
+pub fn convert_playback_speed(playback_speed: f32) -> i32 {
+    #[cfg(target_os = "macos")]
+    {
+        (playback_speed * 200.0) as i32
+    }
+    #[cfg(target_os = "linux")]
+    {
+        ((playback_speed * 100.0) as i32).clamp(50, 200)
     }
 }

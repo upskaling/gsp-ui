@@ -1,3 +1,5 @@
+mod clipboard;
+mod config;
 mod language_detector;
 mod model_downloader;
 mod ocr;
@@ -8,14 +10,14 @@ mod translation_engine;
 mod translator;
 mod tts;
 
+use clipboard::get_clipboard_text;
+use config::{load_config, update_config, ClipboardShortcut};
 use language_detector::{detect_language, DetectedLanguage};
 use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use screenshooter::screenshot_region;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -23,11 +25,6 @@ use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
-#[cfg(target_os = "linux")]
-use tts::EspeakNg;
-#[cfg(target_os = "macos")]
-use tts::MacOsTts;
-use tts::TtsEngine;
 
 struct AudioPlayback {
     player: Player,
@@ -38,138 +35,9 @@ struct AudioPlayback {
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
 static CURRENT_THREAD_ID: Mutex<u128> = Mutex::new(0);
-static CONFIG_CACHE: Mutex<Option<Arc<AppConfig>>> = Mutex::new(None);
 
 struct PlaybackState {
     _dummy: u8,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct AppConfig {
-    #[serde(default)]
-    clipboard_shortcut: ClipboardShortcut,
-    #[serde(default)]
-    ocr_shortcut: ClipboardShortcut,
-    #[serde(default)]
-    playback_speed: f32,
-    #[serde(default)]
-    dev_mode: bool,
-    #[serde(default)]
-    source_language: String,
-    #[serde(default)]
-    target_language: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ClipboardShortcut {
-    #[serde(default)]
-    ctrl: bool,
-    #[serde(default)]
-    shift: bool,
-    #[serde(default)]
-    alt: bool,
-    #[serde(default)]
-    meta: bool,
-    #[serde(default)]
-    key: String,
-}
-
-impl Default for ClipboardShortcut {
-    fn default() -> Self {
-        ClipboardShortcut {
-            ctrl: true,
-            shift: true,
-            alt: false,
-            meta: false,
-            key: "V".to_string(),
-        }
-    }
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        AppConfig {
-            clipboard_shortcut: ClipboardShortcut {
-                ctrl: true,
-                shift: true,
-                alt: false,
-                meta: false,
-                key: "V".to_string(),
-            },
-            ocr_shortcut: ClipboardShortcut {
-                ctrl: true,
-                shift: false,
-                alt: true,
-                meta: false,
-                key: "o".to_string(),
-            },
-            playback_speed: 1.0,
-            dev_mode: false,
-            source_language: "auto".to_string(),
-            target_language: "fr".to_string(),
-        }
-    }
-}
-
-fn get_config_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Impossible de trouver le répertoire de configuration".to_string())?;
-    let app_config_dir = config_dir.join("gsp-ui");
-
-    if !app_config_dir.exists() {
-        std::fs::create_dir_all(&app_config_dir)
-            .map_err(|e| format!("Impossible de créer le répertoire de config: {}", e))?;
-    }
-
-    Ok(app_config_dir.join("config.json"))
-}
-
-fn load_config() -> Result<AppConfig, String> {
-    let mut cache = CONFIG_CACHE
-        .lock()
-        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
-
-    if let Some(cached) = cache.as_ref() {
-        return Ok((**cached).clone());
-    }
-
-    let config_path = get_config_path()?;
-
-    let config = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Erreur de lecture du fichier de config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Erreur de parsing du fichier de config: {}", e))?
-    } else {
-        AppConfig::default()
-    };
-
-    *cache = Some(Arc::new(config.clone()));
-    Ok(config)
-}
-
-fn save_config(config: &AppConfig) -> Result<(), String> {
-    let config_path = get_config_path()?;
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Erreur de sérialisation: {}", e))?;
-    std::fs::write(&config_path, content)
-        .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))?;
-
-    let mut cache = CONFIG_CACHE
-        .lock()
-        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
-    *cache = Some(Arc::new(config.clone()));
-
-    Ok(())
-}
-
-fn update_config<F>(f: F) -> Result<(), String>
-where
-    F: FnOnce(&mut AppConfig),
-{
-    let mut config = load_config()?;
-    f(&mut config);
-    save_config(&config)
 }
 
 fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
@@ -570,16 +438,10 @@ fn execute_speech_pipeline(
     }
 
     debug!("[{}] Création du TTS engine", log_tag);
-    #[cfg(target_os = "macos")]
-    let mut tts = MacOsTts::new();
-    #[cfg(target_os = "linux")]
-    let mut tts = EspeakNg::new();
+    let mut tts = tts::create_tts_engine();
     tts.set_lang(input.target_lang.clone());
 
-    #[cfg(target_os = "macos")]
-    let tts_speed = (input.playback_speed * 200.0) as i32;
-    #[cfg(target_os = "linux")]
-    let tts_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
+    let tts_speed = tts::convert_playback_speed(input.playback_speed);
     tts.set_speed(tts_speed);
 
     debug!(
@@ -819,87 +681,6 @@ fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     } else {
         debug!("[STOP_SPEAK] Aucune lecture en cours");
     }
-
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn get_clipboard_text() -> Result<String, String> {
-    use x11_clipboard::Clipboard;
-
-    let clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
-
-    let atoms = clipboard.getter.atoms.clone();
-    let timeout = std::time::Duration::from_secs(1);
-
-    clipboard
-        .load(
-            clipboard.setter.atoms.primary,
-            atoms.utf8_string,
-            atoms.property,
-            timeout,
-        )
-        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
-        .and_then(|data| {
-            String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
-        })
-}
-
-#[cfg(target_os = "macos")]
-fn get_clipboard_text() -> Result<String, String> {
-    use arboard::Clipboard;
-    use std::thread;
-    use std::time::Duration;
-
-    let mut clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
-
-    let saved_text = clipboard.get_text().ok();
-
-    simulate_cmd_c()?;
-
-    for _ in 0..50 {
-        thread::sleep(Duration::from_millis(10));
-
-        if let Ok(text) = clipboard.get_text() {
-            if saved_text.as_ref() != Some(&text) && !text.is_empty() {
-                if let Some(ref saved) = saved_text {
-                    let _ = clipboard.set_text(saved);
-                }
-                return Ok(text);
-            }
-        }
-    }
-
-    Err("Impossible de récupérer le texte sélectionné".to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn simulate_cmd_c() -> Result<(), String> {
-    use core_graphics::event::CGEventFlags;
-    use core_graphics::event::CGEventTapLocation;
-    use core_graphics::event::{CGEvent, CGKeyCode};
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-    use std::thread;
-    use std::time::Duration;
-
-    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
-        .map_err(|_| "Impossible de créer la source d'événement".to_string())?;
-
-    let keycode: CGKeyCode = 8;
-
-    let down = CGEvent::new_keyboard_event(source.clone(), keycode, true)
-        .map_err(|_| "Erreur création événement clavier down".to_string())?;
-    down.set_flags(CGEventFlags::CGEventFlagCommand);
-    down.post(CGEventTapLocation::HID);
-
-    thread::sleep(Duration::from_millis(5));
-
-    let up = CGEvent::new_keyboard_event(source, keycode, false)
-        .map_err(|_| "Erreur création événement clavier up".to_string())?;
-    up.set_flags(CGEventFlags::CGEventFlagCommand);
-    up.post(CGEventTapLocation::HID);
 
     Ok(())
 }
