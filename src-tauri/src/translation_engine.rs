@@ -147,15 +147,70 @@ impl TranslationEngine {
 }
 
 fn translate_with_model(executor: &mut Executor, model: &Model, text: &str) -> Result<String> {
-    let translations = executor
-        .translate_batch(model, &[text.to_string()], &DecodeOptions::default())
-        .context("Erreur lors de la traduction avec le modèle")?;
+    let sentences = split_into_sentences(text);
 
-    translations
-        .into_iter()
-        .next()
-        .map(|t| t.text)
-        .ok_or_else(|| anyhow::anyhow!("Aucune traduction retournée"))
+    if sentences.len() == 1 {
+        let translations = executor
+            .translate_batch(model, &[text.to_string()], &DecodeOptions::default())
+            .context("Erreur lors de la traduction avec le modèle")?;
+
+        translations
+            .into_iter()
+            .next()
+            .map(|t| t.text)
+            .ok_or_else(|| anyhow::anyhow!("Aucune traduction retournée"))
+    } else {
+        let translations = executor
+            .translate_batch(model, &sentences, &DecodeOptions::default())
+            .context("Erreur lors de la traduction par lots avec le modèle")?;
+
+        let translated_sentences: Vec<String> = translations
+            .into_iter()
+            .map(|t| t.text)
+            .collect();
+
+        if translated_sentences.len() != sentences.len() {
+            return Err(anyhow::anyhow!(
+                "Nombre de traductions retournées ({}) ne correspond pas au nombre de phrases ({})",
+                translated_sentences.len(),
+                sentences.len()
+            ));
+        }
+
+        Ok(translated_sentences.join(" "))
+    }
+}
+
+fn split_into_sentences(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut current_start = 0;
+    let bytes = text.as_bytes();
+
+    for i in 0..bytes.len() {
+        let ch = bytes[i] as char;
+        if (ch == '.' || ch == '!' || ch == '?') && i + 1 < bytes.len() {
+            let next_ch = bytes[i + 1] as char;
+            if next_ch == ' ' || next_ch.is_whitespace() {
+                let sentence = text[current_start..=i].trim();
+                if !sentence.is_empty() {
+                    sentences.push(sentence.to_string());
+                }
+                current_start = i + 1;
+                while current_start < bytes.len() && (bytes[current_start] as char).is_whitespace() {
+                    current_start += 1;
+                }
+            }
+        }
+    }
+
+    if current_start < text.len() {
+        let remaining = text[current_start..].trim();
+        if !remaining.is_empty() {
+            sentences.push(remaining.to_string());
+        }
+    }
+
+    sentences
 }
 
 fn parse_language_code(code: &str) -> Result<Language> {
