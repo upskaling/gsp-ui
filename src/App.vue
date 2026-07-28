@@ -51,6 +51,8 @@ const devMode = ref(false);
 const showModelsPage = ref(false);
 const models = ref<Array<{ name: string; size_mb: number }>>([]);
 const loadingModels = ref(false);
+const showAbout = ref(false);
+const appVersion = "0.1.0";
 let shortcutInProgress = false;
 let unlisten: (() => void)[] = [];
 
@@ -636,6 +638,9 @@ onUnmounted(() => {
         <button @click="showModelsPage = !showModelsPage" class="models-btn">
           📦 Modèles
         </button>
+        <button @click="showAbout = !showAbout" class="about-btn">
+          ℹ️ À propos
+        </button>
         <label class="dev-mode-toggle">
           <input type="checkbox" v-model="devMode" @change="toggleDevMode" />
           🧪 Dev
@@ -757,6 +762,22 @@ onUnmounted(() => {
         <div class="models-page-buttons">
           <button @click="loadModels" class="refresh-btn">🔄 Actualiser</button>
           <button @click="showModelsPage = false" class="close-btn">Fermer</button>
+        </div>
+      </div>
+
+      <div v-if="showAbout" class="about-dialog">
+        <div class="about-content">
+          <h2>À propos de gsp-ui</h2>
+          <p class="version">Version {{ appVersion }}</p>
+          <p class="description">
+            Une application de lecture d'écran pour les utilisateurs dyslexiques.
+          </p>
+          <p class="github-link">
+            <a href="https://github.com/upskaling/gsp-ui" target="_blank" rel="noopener noreferrer">
+              🔗 Consulter le code source sur GitHub
+            </a>
+          </p>
+          <button @click="showAbout = false" class="close-btn">Fermer</button>
         </div>
       </div>
 
