@@ -874,6 +874,7 @@ mod tests {
 
     #[test]
     fn test_app_config_default() {
+        use config::AppConfig;
         // Teste les valeurs par défaut de la config
         let config = AppConfig::default();
         assert_eq!(config.playback_speed, 1.0);
