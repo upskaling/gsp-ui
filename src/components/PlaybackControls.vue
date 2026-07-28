@@ -18,9 +18,6 @@ interface Emits {
   (e: 'speed-change', speed: number): void
   (e: 'source-language-change', lang: string): void
   (e: 'target-language-change', lang: string): void
-  (e: 'config-click'): void
-  (e: 'models-click'): void
-  (e: 'about-click'): void
 }
 
 withDefaults(defineProps<Props>(), {})
@@ -110,28 +107,5 @@ defineEmits<Emits>()
       </div>
     </div>
 
-    <!-- Settings buttons -->
-    <div class="flex gap-2 flex-wrap">
-      <button
-        @click="$emit('config-click')"
-        class="px-4 py-2 rounded bg-mid-gray/15 border border-mid-gray/30 hover:bg-background-ui hover:text-white transition text-sm font-medium"
-      >
-        ⚙️ Configurer
-      </button>
-
-      <button
-        @click="$emit('models-click')"
-        class="px-4 py-2 rounded bg-mid-gray/15 border border-mid-gray/30 hover:bg-background-ui hover:text-white transition text-sm font-medium"
-      >
-        📦 Modèles
-      </button>
-
-      <button
-        @click="$emit('about-click')"
-        class="px-4 py-2 rounded bg-mid-gray/15 border border-mid-gray/30 hover:bg-background-ui hover:text-white transition text-sm font-medium"
-      >
-        ℹ️ À propos
-      </button>
-    </div>
   </div>
 </template>

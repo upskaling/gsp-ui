@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import './styles/theme.css'
 import './App.css'
 
+import Sidebar, { type SidebarSection } from './components/Sidebar.vue'
 import PlaybackControls from './components/PlaybackControls.vue'
 import ShortcutConfigPanel from './components/ShortcutConfigPanel.vue'
 import ModelsPage from './components/ModelsPage.vue'
@@ -16,9 +17,7 @@ import { useLanguage } from './composables/useLanguage'
 import { useKeyRecording } from './composables/useKeyRecording'
 
 const appVersion = '0.1.0'
-const showConfig = ref(false)
-const showModelsPage = ref(false)
-const showAbout = ref(false)
+const activeSection = ref<SidebarSection>('playback')
 const devMode = ref(false)
 
 let shortcutInProgress = false
@@ -154,109 +153,102 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="min-h-screen bg-background text-text">
-    <div class="max-w-2xl mx-auto p-6">
+  <main class="h-screen bg-background text-text flex overflow-hidden">
+    <!-- Sidebar navigation -->
+    <Sidebar :active-section="activeSection" @section-change="activeSection = $event" />
+
+    <!-- Main content area -->
+    <div class="flex-1 flex flex-col overflow-hidden">
       <!-- Header -->
-      <div class="mb-8">
-        <h1 class="text-3xl font-bold mb-2">gsp-ui</h1>
+      <div class="border-b border-mid-gray/20 px-6 py-4">
+        <h1 class="text-2xl font-bold">
+          <template v-if="activeSection === 'playback'">Lecture</template>
+          <template v-else-if="activeSection === 'shortcuts'">Configuration des raccourcis</template>
+          <template v-else-if="activeSection === 'models'">Modèles</template>
+          <template v-else-if="activeSection === 'about'">À propos</template>
+        </h1>
       </div>
 
-      <!-- Playback Controls -->
-      <div class="mb-8">
-        <PlaybackControls
-          :is-speaking="playback.isSpeaking.value"
-          :playback-speed="playback.playbackSpeed.value"
-          :speed-options="playback.speedOptions"
-          :source-language="language.sourceLanguage.value"
-          :target-language="language.targetLanguage.value"
-          :source-language-options="language.sourceLanguageOptions"
-          :target-language-options="language.targetLanguageOptions"
-          @speak="playback.speakSelection"
-          @speak-ocr="playback.speakOCR"
-          @stop="playback.stopSpeaking"
-          @speed-change="playback.setPlaybackSpeed"
-          @source-language-change="language.setSourceLanguage"
-          @target-language-change="language.setTargetLanguage"
-          @config-click="showConfig = !showConfig"
-          @models-click="showModelsPage = !showModelsPage"
-          @about-click="showAbout = !showAbout"
-        />
-      </div>
+      <!-- Scrollable content area -->
+      <div class="flex-1 overflow-y-auto p-6">
+        <!-- Playback Section -->
+        <div v-if="activeSection === 'playback'" class="max-w-2xl">
+          <PlaybackControls
+            :is-speaking="playback.isSpeaking.value"
+            :playback-speed="playback.playbackSpeed.value"
+            :speed-options="playback.speedOptions"
+            :source-language="language.sourceLanguage.value"
+            :target-language="language.targetLanguage.value"
+            :source-language-options="language.sourceLanguageOptions"
+            :target-language-options="language.targetLanguageOptions"
+            @speak="playback.speakSelection"
+            @speak-ocr="playback.speakOCR"
+            @stop="playback.stopSpeaking"
+            @speed-change="playback.setPlaybackSpeed"
+            @source-language-change="language.setSourceLanguage"
+            @target-language-change="language.setTargetLanguage"
+          />
 
-      <!-- Dev Mode Toggle (debug only) -->
-      <div v-if="devMode" class="mb-6 p-4 bg-mid-gray/10 rounded">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" v-model="devMode" @change="toggleDevMode" class="w-4 h-4" />
-          <span class="text-sm">🧪 Dev Mode</span>
-        </label>
-      </div>
-
-      <!-- Shortcut Config Section -->
-      <div v-if="showConfig" class="mb-8 space-y-4">
-        <h2 class="text-2xl font-bold mb-4">Configuration des raccourcis</h2>
-
-        <ShortcutConfigPanel
-          title="Raccourci - Lecture"
-          :shortcut-config="shortcuts.shortcutConfig.value"
-          :recording-key="shortcuts.recordingKey.value"
-          binding-id="clipboard"
-          @update:shortcut-config="(config) => (shortcuts.shortcutConfig.value = config)"
-          @toggle-recording="shortcuts.toggleRecordingKey"
-        />
-
-        <ShortcutConfigPanel
-          title="Raccourci - OCR"
-          :shortcut-config="shortcuts.ocrShortcutConfig.value"
-          :recording-key="shortcuts.recordingOCRKey.value"
-          binding-id="ocr"
-          @update:shortcut-config="(config) => (shortcuts.ocrShortcutConfig.value = config)"
-          @toggle-recording="shortcuts.toggleRecordingOCRKey"
-        />
-
-        <!-- Config buttons -->
-        <div class="flex gap-2 justify-center pt-4">
-          <button
-            @click="shortcuts.saveAllShortcutConfigs().then(() => (showConfig = false))"
-            class="px-6 py-2 bg-background-ui text-white rounded font-medium hover:opacity-90 transition"
-          >
-            💾 Enregistrer
-          </button>
-          <button
-            @click="shortcuts.resetShortcutsToDefault"
-            class="px-6 py-2 bg-mid-gray/20 rounded font-medium hover:bg-mid-gray/40 transition"
-          >
-            🔄 Réinitialiser
-          </button>
-          <button
-            @click="showConfig = false"
-            class="px-6 py-2 bg-mid-gray/20 rounded font-medium hover:bg-mid-gray/40 transition"
-          >
-            ✕ Annuler
-          </button>
+          <!-- Dev Mode Toggle (debug only) -->
+          <div v-if="devMode" class="mt-6 p-4 bg-mid-gray/10 rounded">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="devMode" @change="toggleDevMode" class="w-4 h-4" />
+              <span class="text-sm">🧪 Dev Mode</span>
+            </label>
+          </div>
         </div>
-      </div>
 
-      <!-- Models Section -->
-      <div v-if="showModelsPage" class="mb-8">
-        <ModelsPage
-          :models="models.models.value"
-          :loading="models.loadingModels.value"
-          @delete="models.deleteModel"
-          @refresh="models.loadModels"
-        />
-        <div class="mt-4 flex justify-center">
-          <button
-            @click="showModelsPage = false"
-            class="px-6 py-2 bg-mid-gray/20 rounded font-medium hover:bg-mid-gray/40 transition"
-          >
-            ✕ Fermer
-          </button>
+        <!-- Shortcuts Configuration Section -->
+        <div v-if="activeSection === 'shortcuts'" class="max-w-2xl space-y-4">
+          <ShortcutConfigPanel
+            title="Raccourci - Lecture"
+            :shortcut-config="shortcuts.shortcutConfig.value"
+            :recording-key="shortcuts.recordingKey.value"
+            binding-id="clipboard"
+            @update:shortcut-config="(config) => (shortcuts.shortcutConfig.value = config)"
+            @toggle-recording="shortcuts.toggleRecordingKey"
+          />
+
+          <ShortcutConfigPanel
+            title="Raccourci - OCR"
+            :shortcut-config="shortcuts.ocrShortcutConfig.value"
+            :recording-key="shortcuts.recordingOCRKey.value"
+            binding-id="ocr"
+            @update:shortcut-config="(config) => (shortcuts.ocrShortcutConfig.value = config)"
+            @toggle-recording="shortcuts.toggleRecordingOCRKey"
+          />
+
+          <!-- Config buttons -->
+          <div class="flex gap-2 pt-4">
+            <button
+              @click="shortcuts.saveAllShortcutConfigs()"
+              class="px-6 py-2 bg-background-ui text-white rounded font-medium hover:opacity-90 transition"
+            >
+              💾 Enregistrer
+            </button>
+            <button
+              @click="shortcuts.resetShortcutsToDefault"
+              class="px-6 py-2 bg-mid-gray/20 rounded font-medium hover:bg-mid-gray/40 transition"
+            >
+              🔄 Réinitialiser
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- About Section -->
-      <div v-if="showAbout" class="mb-8">
-        <AboutDialog :version="appVersion" @close="showAbout = false" />
+        <!-- Models Section -->
+        <div v-if="activeSection === 'models'" class="max-w-2xl">
+          <ModelsPage
+            :models="models.models.value"
+            :loading="models.loadingModels.value"
+            @delete="models.deleteModel"
+            @refresh="models.loadModels"
+          />
+        </div>
+
+        <!-- About Section -->
+        <div v-if="activeSection === 'about'" class="max-w-2xl">
+          <AboutDialog :version="appVersion" />
+        </div>
       </div>
     </div>
   </main>
