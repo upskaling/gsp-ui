@@ -211,7 +211,7 @@ impl TtsEngine for PiperTts {
     }
 
     fn set_speed(&mut self, speed: i32) {
-        self.speed = (speed as f32 / 100.0).clamp(0.5, 2.0);
+        self.speed = (speed as f32 / 100.0).clamp(0.5, 3.0);
     }
 }
 
@@ -419,7 +419,7 @@ impl TtsEngine for EspeakNgTts {
     }
 
     fn set_speed(&mut self, speed: i32) {
-        self.speed = (speed as f32 / 100.0).clamp(0.5, 2.0);
+        self.speed = (speed as f32 / 100.0).clamp(0.5, 3.0);
     }
 }
 

@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 export function usePlayback() {
   const isSpeaking = ref(false)
   const playbackSpeed = ref(1.0)
-  const speedOptions = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+  const speedOptions = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
 
   async function speakSelection() {
     console.log('[speakSelection] Début')

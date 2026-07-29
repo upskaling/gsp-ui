@@ -275,7 +275,7 @@ fn load_playback_speed() -> Result<f32, String> {
 
 #[tauri::command]
 fn save_playback_speed(speed: f32) -> Result<(), String> {
-    update_config(|cfg| cfg.playback_speed = speed.clamp(0.5, 2.0))
+    update_config(|cfg| cfg.playback_speed = speed.clamp(0.5, 3.0))
 }
 
 #[tauri::command]
