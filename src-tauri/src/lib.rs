@@ -17,7 +17,6 @@ use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use screenshooter::screenshot_region;
-use std::process::Command;
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
@@ -32,7 +31,6 @@ struct AudioPlayback {
     _device_sink: Box<dyn std::any::Any + Send>,
     #[allow(dead_code)]
     thread_id: u128,
-    sink_input_index: Option<u32>,
 }
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
@@ -297,12 +295,8 @@ fn set_playing_volume(volume: f32) -> Result<(), String> {
         .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
 
     if let Some(playback) = sink_guard.as_ref() {
-        if let Some(index) = playback.sink_input_index {
-            set_pulseaudio_volume(index, volume.clamp(0.0, 1.0));
-            Ok(())
-        } else {
-            Err("Index du sink input non disponible".to_string())
-        }
+        playback.player.set_volume(volume.clamp(0.0, 1.0));
+        Ok(())
     } else {
         Err("Aucune lecture en cours".to_string())
     }
@@ -467,31 +461,6 @@ struct SpeechPipelineInput {
     dev_mode: bool,
 }
 
-fn get_latest_sink_input_index() -> Option<u32> {
-    let output = Command::new("pactl")
-        .args(["list", "short", "sink-inputs"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .last()
-        .and_then(|line| line.split('\t').next())
-        .and_then(|idx| idx.parse::<u32>().ok())
-}
-
-fn set_pulseaudio_volume(sink_input_index: u32, volume: f32) {
-    let _ = Command::new("pactl")
-        .args(["set-sink-input-volume", &sink_input_index.to_string(), &format!("{}%", (volume * 100.0) as u32)])
-        .output();
-    debug!("[set_pulseaudio_volume] Volume du sink input {} mis à jour à {}%", sink_input_index, (volume * 100.0) as u32);
-}
-
 fn execute_speech_pipeline(
     input: SpeechPipelineInput,
     _state: State<Mutex<PlaybackState>>,
@@ -593,6 +562,7 @@ fn execute_speech_pipeline(
         .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
     device_sink.log_on_drop(false);
     let player = Player::connect_new(device_sink.mixer());
+    player.set_volume(input.volume.clamp(0.0, 1.0));
 
     debug!("[{}] Lecture du fichier: {}", log_tag, audio_file_path);
     let file = std::fs::File::open(&audio_file_path)
@@ -601,12 +571,6 @@ fn execute_speech_pipeline(
         .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
 
     player.append(source);
-
-    // Appliquer le volume initial via PulseAudio
-    let sink_input_index = get_latest_sink_input_index();
-    if let Some(index) = sink_input_index {
-        set_pulseaudio_volume(index, input.volume);
-    }
 
     let thread_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -621,7 +585,6 @@ fn execute_speech_pipeline(
             player,
             _device_sink: Box::new(device_sink),
             thread_id,
-            sink_input_index,
         });
     }
 
