@@ -48,11 +48,12 @@ impl TtsEngine for EspeakNg {
     fn speak(&self, text: &str) -> Result<String, String> {
         let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
 
-        let voice = if self.lang == "en" {
-            "mb-EN1"
-        } else {
-            "mb-FR4"
-        };
+        let voice = if self.lang == "en" { "en-us" } else { "mb-FR4" };
+
+        debug!(
+            "[TTS] Appel espeak-ng avec langue: {}, voice: {}, speed: {}",
+            self.lang, voice, speed
+        );
 
         let result = Command::new("espeak-ng")
             .arg("-v")
@@ -71,6 +72,12 @@ impl TtsEngine for EspeakNg {
 
         match result {
             Ok(output) => {
+                debug!(
+                    "[TTS] Résultat espeak-ng - status: {}, stderr: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+
                 if !output.status.success() {
                     return Err(format!(
                         "Erreur espeak-ng: {}",

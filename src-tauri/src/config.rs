@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 pub static CONFIG_CACHE: Mutex<Option<Arc<AppConfig>>> = Mutex::new(None);
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppConfig {
     #[serde(default)]
     pub clipboard_shortcut: ClipboardShortcut,
@@ -20,7 +20,7 @@ pub struct AppConfig {
     pub target_language: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ClipboardShortcut {
     #[serde(default)]
     pub ctrl: bool,
@@ -130,4 +130,101 @@ where
     let mut config = load_config()?;
     f(&mut config);
     save_config(&config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clipboard_shortcut_default() {
+        // Test: vérifier les valeurs par défaut du raccourci clipboard
+        let default = ClipboardShortcut::default();
+        assert!(default.ctrl);
+        assert!(default.shift);
+        assert!(!default.alt);
+        assert!(!default.meta);
+        assert_eq!(default.key, "V");
+    }
+
+    #[test]
+    fn test_app_config_default() {
+        // Test: vérifier les valeurs par défaut de la configuration
+        let config = AppConfig::default();
+        assert_eq!(config.playback_speed, 1.0);
+        assert!(!config.dev_mode);
+        assert_eq!(config.source_language, "auto");
+        assert_eq!(config.target_language, "fr");
+    }
+
+    #[test]
+    fn test_app_config_clipboard_shortcut_default() {
+        // Test: vérifier le raccourci clipboard dans la config par défaut
+        let config = AppConfig::default();
+        assert!(config.clipboard_shortcut.ctrl);
+        assert!(config.clipboard_shortcut.shift);
+        assert_eq!(config.clipboard_shortcut.key, "V");
+    }
+
+    #[test]
+    fn test_app_config_ocr_shortcut_default() {
+        // Test: vérifier le raccourci OCR dans la config par défaut
+        let config = AppConfig::default();
+        assert!(config.ocr_shortcut.ctrl);
+        assert!(!config.ocr_shortcut.shift);
+        assert!(config.ocr_shortcut.alt);
+        assert_eq!(config.ocr_shortcut.key, "o");
+    }
+
+    #[test]
+    fn test_clipboard_shortcut_serializable() {
+        // Test: vérifier que le raccourci peut être sérialisé en JSON
+        let shortcut = ClipboardShortcut::default();
+        let json = serde_json::to_string(&shortcut);
+        assert!(json.is_ok());
+
+        let json_str = json.unwrap();
+        let deserialized: Result<ClipboardShortcut, _> = serde_json::from_str(&json_str);
+        assert!(deserialized.is_ok());
+        assert_eq!(deserialized.unwrap(), shortcut);
+    }
+
+    #[test]
+    fn test_app_config_serializable() {
+        // Test: vérifier que la configuration peut être sérialisée en JSON
+        let config = AppConfig::default();
+        let json = serde_json::to_string(&config);
+        assert!(json.is_ok());
+
+        let json_str = json.unwrap();
+        let deserialized: Result<AppConfig, _> = serde_json::from_str(&json_str);
+        assert!(deserialized.is_ok());
+        let deserialized_config = deserialized.unwrap();
+        assert_eq!(deserialized_config.playback_speed, config.playback_speed);
+        assert_eq!(deserialized_config.dev_mode, config.dev_mode);
+        assert_eq!(deserialized_config.source_language, config.source_language);
+        assert_eq!(deserialized_config.target_language, config.target_language);
+    }
+
+    #[test]
+    fn test_playback_speed_valid_range() {
+        // Test: vérifier que la vitesse de lecture est dans une plage raisonnable
+        let config = AppConfig::default();
+        assert!(config.playback_speed >= 0.5);
+        assert!(config.playback_speed <= 2.0);
+    }
+
+    #[test]
+    fn test_app_config_source_language_auto() {
+        // Test: la langue source par défaut doit être "auto"
+        let config = AppConfig::default();
+        assert_eq!(config.source_language, "auto");
+    }
+
+    #[test]
+    fn test_app_config_target_language_french() {
+        // Test: la langue cible par défaut doit être "fr"
+        let config = AppConfig::default();
+        assert_eq!(config.target_language, "fr");
+    }
 }

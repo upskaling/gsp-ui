@@ -164,10 +164,7 @@ fn translate_with_model(executor: &mut Executor, model: &Model, text: &str) -> R
             .translate_batch(model, &sentences, &DecodeOptions::default())
             .context("Erreur lors de la traduction par lots avec le modèle")?;
 
-        let translated_sentences: Vec<String> = translations
-            .into_iter()
-            .map(|t| t.text)
-            .collect();
+        let translated_sentences: Vec<String> = translations.into_iter().map(|t| t.text).collect();
 
         if translated_sentences.len() != sentences.len() {
             return Err(anyhow::anyhow!(
@@ -196,7 +193,8 @@ fn split_into_sentences(text: &str) -> Vec<String> {
                     sentences.push(sentence.to_string());
                 }
                 current_start = i + 1;
-                while current_start < bytes.len() && (bytes[current_start] as char).is_whitespace() {
+                while current_start < bytes.len() && (bytes[current_start] as char).is_whitespace()
+                {
                     current_start += 1;
                 }
             }

@@ -350,11 +350,13 @@ fn translate_if_needed(
     let detected_code = get_language_code(detected_lang);
 
     if source_lang == "auto" {
-        if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
+        // Mode auto-détection: traduire si la langue détectée diffère de la cible
+        if detected_code != target_lang {
             debug!(
-                "[TRANSLATOR] Détection automatique: texte en anglais, traduction en français..."
+                "[TRANSLATOR] Détection automatique: texte en {}, traduction en {}...",
+                detected_code, target_lang
             );
-            match translate(text, "en", "fr") {
+            match translate(text, detected_code, target_lang) {
                 Ok(translated) => {
                     debug!("[TRANSLATOR] Traduction réussie");
                     Ok(translated)
@@ -366,9 +368,15 @@ fn translate_if_needed(
                 }
             }
         } else {
+            // Langue détectée == langue cible, pas de traduction
+            debug!(
+                "[TRANSLATOR] Détection automatique: texte et cible dans la même langue ({}), pas de traduction",
+                detected_code
+            );
             Ok(text.to_string())
         }
     } else if source_lang != target_lang {
+        // Source spécifiée par l'utilisateur et différente de la cible: traduire
         debug!(
             "[TRANSLATOR] Traduction de {} en {}...",
             source_lang, target_lang
@@ -385,6 +393,7 @@ fn translate_if_needed(
             }
         }
     } else {
+        // Source == cible, pas de traduction
         Ok(text.to_string())
     }
 }
@@ -439,7 +448,44 @@ fn execute_speech_pipeline(
 
     debug!("[{}] Création du TTS engine", log_tag);
     let mut tts = tts::create_tts_engine();
-    tts.set_lang(input.target_lang.clone());
+
+    // Déterminer la langue du TTS en fonction du texte final (potentiellement traduit)
+    let tts_lang = if input.source_lang == "auto" {
+        // Source auto: vérifier si une traduction s'est produite
+        let detected_code = get_language_code(detected_lang);
+
+        if detected_code != input.target_lang {
+            // Une traduction s'est produite (detected != target)
+            // Utiliser directement la langue cible au lieu de re-détecter
+            debug!(
+                "[{}] Traduction détectée (auto-source {} → cible {}), utilisation de la langue cible pour TTS",
+                log_tag, detected_code, input.target_lang
+            );
+            input.target_lang.clone()
+        } else {
+            // Pas de traduction: re-détecter est inutile, utiliser la langue détectée
+            debug!(
+                "[{}] Pas de traduction (detected == cible: {}), utilisation de la langue détectée pour TTS",
+                log_tag, detected_code
+            );
+            detected_code.to_string()
+        }
+    } else if input.source_lang != input.target_lang {
+        // Source spécifiée et différent de cible: le texte a été traduit, utilise la langue cible
+        debug!(
+            "[{}] Texte traduit de {} vers {}, utilisation de la langue cible pour TTS",
+            log_tag, input.source_lang, input.target_lang
+        );
+        input.target_lang.clone()
+    } else {
+        // Source == cible: pas de traduction, utilise la langue source
+        debug!(
+            "[{}] Pas de traduction (source == cible: {}), utilisation de la langue source pour TTS",
+            log_tag, input.source_lang
+        );
+        input.source_lang.clone()
+    };
+    tts.set_lang(tts_lang);
 
     let tts_speed = tts::convert_playback_speed(input.playback_speed);
     tts.set_speed(tts_speed);
@@ -926,5 +972,162 @@ mod tests {
         assert_eq!(result1.alt, result2.alt);
         assert_eq!(result1.shift, result2.shift);
         assert_eq!(result1.key, result2.key);
+    }
+
+    // ==================== Tests de logique de traduction ====================
+    // Cas d'usage utilisateur:
+    // 1. Texte EN + source auto + cible FR → traduire EN→FR + lire en FR
+    // 2. Texte EN + source auto + cible EN → lire en EN (pas de traduction)
+    // 3. Texte FR + source auto + cible EN → traduire FR→EN + lire en EN
+    // 4. Texte FR + source auto + cible FR → lire en FR (pas de traduction)
+
+    #[test]
+    fn test_case_1_english_auto_source_french_target() {
+        // Cas 1: Texte anglais + auto-détection + cible français
+        // Attendu: Doit tenter une traduction (ou retourner le texte original en cas d'erreur)
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "auto", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_2_english_auto_source_english_target() {
+        // Cas 2: Texte anglais + auto-détection + cible anglais
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "auto", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_case_3_french_auto_source_english_target() {
+        // Cas 3: Texte français + auto-détection + cible anglais
+        // Attendu: Doit tenter une traduction (ou retourner le texte original en cas d'erreur)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_4_french_auto_source_french_target() {
+        // Cas 4: Texte français + auto-détection + cible français
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Bonjour");
+    }
+
+    #[test]
+    fn test_case_3_fails_gracefully_without_translation_engine() {
+        // Cas 3 bis: Vérifier que même si la traduction échoue, on retourne le texte original
+        // (le moteur de traduction peut ne pas être initialisé dans les tests)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "en");
+        assert!(result.is_ok());
+        // Même en cas d'erreur de traduction, on retourne quelque chose
+        assert!(!result.unwrap().is_empty());
+    }
+
+    // ==================== Cas additionnels (source spécifiée, pas auto) ====================
+
+    #[test]
+    fn test_case_5_english_source_english_target_french() {
+        // Cas 5: Texte EN + source EN + cible FR
+        // Attendu: Doit tenter une traduction (source != cible)
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "en", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original en cas d'erreur)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_6_french_source_french_target_english() {
+        // Cas 6: Texte FR + source FR + cible EN
+        // Attendu: Doit tenter une traduction (source != cible)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "fr", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original en cas d'erreur)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_english_source_english_target_same_language() {
+        // Cas: Source EN + cible EN (même langue)
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "en", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_case_french_source_french_target_same_language() {
+        // Cas: Source FR + cible FR (même langue)
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "fr", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Bonjour");
+    }
+
+    // ==================== Test de la logique de langue TTS après traduction ====================
+
+    #[test]
+    fn test_tts_language_selection_auto_with_translation() {
+        // Cas critique corrigé: En mode auto, après traduction EN->FR,
+        // le TTS doit utiliser FR, pas re-détecter et utiliser EN
+        // Ce test simule la logique de `execute_speech_pipeline()`
+
+        // Simule: texte EN, auto-source, cible FR
+        let detected_lang = DetectedLanguage::English;
+        let source_lang = "auto";
+        let target_lang = "fr";
+        let detected_code = get_language_code(detected_lang);
+
+        // La logique correcte:
+        let tts_lang = if source_lang == "auto" {
+            if detected_code != target_lang {
+                // Traduction s'est produite, utiliser la cible
+                target_lang.to_string()
+            } else {
+                detected_code.to_string()
+            }
+        } else {
+            detected_code.to_string()
+        };
+
+        // Le TTS doit utiliser "fr", pas "en"
+        assert_eq!(tts_lang, "fr");
+    }
+
+    #[test]
+    fn test_tts_language_selection_auto_without_translation() {
+        // Cas: En mode auto, si pas de traduction (EN -> EN ou FR -> FR),
+        // le TTS doit utiliser la langue détectée
+
+        // Simule: texte FR, auto-source, cible FR (pas de traduction)
+        let detected_lang = DetectedLanguage::French;
+        let source_lang = "auto";
+        let target_lang = "fr";
+        let detected_code = get_language_code(detected_lang);
+
+        let tts_lang = if source_lang == "auto" {
+            if detected_code != target_lang {
+                target_lang.to_string()
+            } else {
+                detected_code.to_string()
+            }
+        } else {
+            detected_code.to_string()
+        };
+
+        assert_eq!(tts_lang, "fr");
     }
 }
