@@ -1,94 +1,208 @@
 //! Moteurs de synthèse vocale
 //!
-//! Utilise eSpeak-NG sur Linux et le moteur TTS intégré (say) sur macOS.
+//! Utilise Piper TTS via CLI sur Linux et le moteur TTS intégré (say) sur macOS.
 
 use log::debug;
 use std::process::Command;
 
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::PermissionsExt;
+
 /// Trait pour les moteurs de synthèse vocale
 pub trait TtsEngine {
-    fn speak(&self, text: &str) -> Result<String, String>;
+    fn speak(&mut self, text: &str) -> Result<String, String>;
     fn set_lang(&mut self, lang: String);
     fn set_speed(&mut self, speed: i32);
 }
 
-/// Configuration du moteur eSpeak-NG (utilisé sur Linux)
+/// Configuration du moteur Piper TTS via CLI (utilisé sur Linux)
 #[cfg(target_os = "linux")]
-#[derive(Debug, Clone)]
-pub struct EspeakNg {
+#[derive(Debug)]
+pub struct PiperTts {
     lang: String,
-    speed: i32,
-    pitch: i32,
-    amplitude: i32,
+    speed: f32,
     output_file: String,
 }
 
 #[cfg(target_os = "linux")]
-impl Default for EspeakNg {
+impl Default for PiperTts {
     fn default() -> Self {
         Self {
             lang: "fr".to_string(),
-            speed: 100,
-            pitch: 50,
-            amplitude: 100,
+            speed: 1.0,
             output_file: "/dev/shm/out.wav".to_string(),
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-impl EspeakNg {
+impl PiperTts {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn get_piper_dir() -> Result<std::path::PathBuf, String> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| "Impossible de trouver le répertoire config".to_string())?;
+        let piper_dir = config_dir.join("gsp-ui").join("piper");
+        std::fs::create_dir_all(&piper_dir)
+            .map_err(|e| format!("Erreur création dossier piper: {}", e))?;
+        Ok(piper_dir)
+    }
+
+    fn get_piper_binary_path() -> Result<std::path::PathBuf, String> {
+        let piper_dir = Self::get_piper_dir()?;
+        Ok(piper_dir.join("piper").join("piper"))
+    }
+
+    fn ensure_piper_binary() -> Result<std::path::PathBuf, String> {
+        let binary_path = Self::get_piper_binary_path()?;
+
+        if binary_path.exists() {
+            debug!("[Piper] Binaire Piper trouvé: {:?}", binary_path);
+            return Ok(binary_path);
+        }
+
+        debug!("[Piper] Téléchargement du binaire Piper...");
+
+        // URL du binaire Piper précompilé pour Linux x86_64
+        let piper_url = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz";
+
+        let piper_dir = Self::get_piper_dir()?;
+        let tar_path = piper_dir.join("piper.tar.gz");
+
+        download_file(piper_url, tar_path.to_str().ok_or("Chemin invalide")?)?;
+
+        debug!("[Piper] Extraction de l'archive...");
+        let file = std::fs::File::open(&tar_path)
+            .map_err(|e| format!("Erreur ouverture archive: {}", e))?;
+        let mut archive = flate2::read::GzDecoder::new(file);
+        tar::Archive::new(&mut archive)
+            .unpack(&piper_dir)
+            .map_err(|e| format!("Erreur extraction: {}", e))?;
+
+        std::fs::remove_file(&tar_path)
+            .map_err(|e| format!("Erreur suppression archive: {}", e))?;
+
+        std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Erreur permission: {}", e))?;
+
+        debug!("[Piper] Binaire téléchargé: {:?}", binary_path);
+        Ok(binary_path)
+    }
+
+    fn get_model_name(&self) -> &'static str {
+        match self.lang.as_str() {
+            "en" => "en_US-lessac-medium",
+            _ => "fr_FR-tom-medium",
+        }
+    }
+
+    fn get_models_dir() -> Result<std::path::PathBuf, String> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| "Impossible de trouver le répertoire config".to_string())?;
+        let models_dir = config_dir.join("gsp-ui").join("piper_models");
+        std::fs::create_dir_all(&models_dir)
+            .map_err(|e| format!("Erreur création dossier piper_models: {}", e))?;
+        Ok(models_dir)
+    }
+
+    fn get_model_path(&self) -> Result<std::path::PathBuf, String> {
+        let models_dir = Self::get_models_dir()?;
+        let model_name = self.get_model_name();
+        Ok(models_dir.join(format!("{}.onnx", model_name)))
+    }
+
+    fn get_model_url(model_name: &str) -> String {
+        let base_url = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0";
+        match model_name {
+            "en_US-lessac-medium" => {
+                format!("{}/en/en_US/lessac/medium/en_US-lessac-medium.onnx", base_url)
+            }
+            "fr_FR-tom-medium" => {
+                format!("{}/fr/fr_FR/tom/medium/fr_FR-tom-medium.onnx", base_url)
+            }
+            _ => format!("{}/{}/{}.onnx", base_url, model_name, model_name),
+        }
+    }
+
+    fn ensure_model_exists(&self) -> Result<(), String> {
+        let model_path = self.get_model_path()?;
+        let config_path_str = format!("{}.json", model_path.display());
+        let config_path = std::path::Path::new(&config_path_str);
+
+        if model_path.exists() && config_path.exists() {
+            debug!("[Piper] Modèle trouvé: {:?}", model_path);
+            return Ok(());
+        }
+
+        debug!("[Piper] Téléchargement du modèle: {}", self.get_model_name());
+        let model_name = self.get_model_name();
+        let model_url = Self::get_model_url(model_name);
+        let config_url = format!("{}.json", model_url);
+
+        download_file(&model_url, model_path.to_str().ok_or("Chemin invalide")?)?;
+        download_file(&config_url, config_path.to_str().ok_or("Chemin invalide")?)?;
+        debug!("[Piper] Modèle et config téléchargés: {:?}", model_path);
+
+        Ok(())
     }
 }
 
 #[cfg(target_os = "linux")]
-impl TtsEngine for EspeakNg {
-    fn speak(&self, text: &str) -> Result<String, String> {
-        let speed = (self.speed as f32 / 100.0 * 320.0) as i32 / 2;
-
-        let voice = if self.lang == "en" { "en-us" } else { "mb-FR4" };
+impl TtsEngine for PiperTts {
+    fn speak(&mut self, text: &str) -> Result<String, String> {
+        self.ensure_model_exists()?;
+        let piper_binary = Self::ensure_piper_binary()?;
+        let model_name = self.get_model_name();
+        let model_path = self.get_model_path()?;
 
         debug!(
-            "[TTS] Appel espeak-ng avec langue: {}, voice: {}, speed: {}",
-            self.lang, voice, speed
+            "[Piper] Synthèse vocale - texte: '{}', modèle: {}, vitesse: {}",
+            text, model_name, self.speed
         );
 
-        let result = Command::new("espeak-ng")
-            .arg("-v")
-            .arg(voice)
-            .arg("-s")
-            .arg(speed.to_string())
-            .arg("-p")
-            .arg(self.pitch.to_string())
-            .arg("-a")
-            .arg(self.amplitude.to_string())
-            .arg("-w")
-            .arg(self.output_file.as_str())
-            .arg("--")
-            .arg(text)
-            .output();
+        let length_scale = 1.0 / self.speed;
+
+        let mut child = Command::new(&piper_binary)
+            .arg("--model")
+            .arg(&model_path)
+            .arg("--length-scale")
+            .arg(length_scale.to_string())
+            .arg("--output-file")
+            .arg(&self.output_file)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Erreur spawn piper: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(text.as_bytes())
+                .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
+        }
+
+        let result = child.wait_with_output()
+            .map_err(|e| format!("Erreur attente piper: {}", e));
 
         match result {
             Ok(output) => {
                 debug!(
-                    "[TTS] Résultat espeak-ng - status: {}, stderr: {}",
+                    "[Piper] Résultat piper - status: {}, stderr: {}",
                     output.status,
                     String::from_utf8_lossy(&output.stderr)
                 );
 
                 if !output.status.success() {
                     return Err(format!(
-                        "Erreur espeak-ng: {}",
+                        "Erreur piper: {}",
                         String::from_utf8_lossy(&output.stderr)
                     ));
                 }
 
-                debug!("[TTS] Audio généré: {}", self.output_file);
+                debug!("[Piper] Audio généré: {}", self.output_file);
                 Ok(self.output_file.clone())
             }
-            Err(e) => Err(format!("Erreur lors de l'exécution d'eSpeak-NG: {}", e)),
+            Err(e) => Err(format!("Erreur lors de l'exécution de Piper: {}", e)),
         }
     }
 
@@ -97,7 +211,7 @@ impl TtsEngine for EspeakNg {
     }
 
     fn set_speed(&mut self, speed: i32) {
-        self.speed = speed;
+        self.speed = (speed as f32 / 100.0).clamp(0.5, 2.0);
     }
 }
 
@@ -135,7 +249,7 @@ impl MacOsTts {
 
 #[cfg(target_os = "macos")]
 impl TtsEngine for MacOsTts {
-    fn speak(&self, text: &str) -> Result<String, String> {
+    fn speak(&mut self, text: &str) -> Result<String, String> {
         let aiff_path = std::env::temp_dir().join("gsp-ui.aiff");
         let wav_path = std::env::temp_dir().join("gsp-ui.wav");
         let aiff_str = aiff_path.to_str().ok_or("Chemin AIFF invalide")?;
@@ -193,6 +307,23 @@ impl TtsEngine for MacOsTts {
     }
 }
 
+fn download_file(url: &str, dest: &str) -> Result<(), String> {
+    debug!("[Download] Téléchargement de: {}", url);
+
+    let response = ureq::get(url)
+        .call()
+        .map_err(|e| format!("Erreur téléchargement: {}", e))?;
+
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| format!("Erreur création fichier: {}", e))?;
+
+    std::io::copy(&mut response.into_reader(), &mut file)
+        .map_err(|e| format!("Erreur copie fichier: {}", e))?;
+
+    debug!("[Download] Fichier téléchargé: {}", dest);
+    Ok(())
+}
+
 /// Crée une instance du moteur TTS appropriée à la plateforme
 pub fn create_tts_engine() -> Box<dyn TtsEngine> {
     #[cfg(target_os = "macos")]
@@ -201,7 +332,7 @@ pub fn create_tts_engine() -> Box<dyn TtsEngine> {
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(EspeakNg::new())
+        Box::new(PiperTts::new())
     }
 }
 
@@ -213,6 +344,106 @@ pub fn convert_playback_speed(playback_speed: f32) -> i32 {
     }
     #[cfg(target_os = "linux")]
     {
-        ((playback_speed * 100.0) as i32).clamp(50, 200)
+        (playback_speed * 100.0) as i32
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct PiperModelInfo {
+    pub name: String,
+    pub size_mb: f64,
+}
+
+#[cfg(target_os = "linux")]
+pub fn list_piper_models() -> Result<Vec<PiperModelInfo>, String> {
+    let models_dir = PiperTts::get_models_dir()?;
+    let mut models = Vec::new();
+
+    if !models_dir.exists() {
+        return Ok(models);
+    }
+
+    for entry in std::fs::read_dir(&models_dir)
+        .map_err(|e| format!("Erreur lecture dossier piper_models: {}", e))?
+    {
+        let entry = entry.map_err(|e| format!("Erreur lecture entry: {}", e))?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "onnx") {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let file_name = entry.file_name();
+                let name = file_name
+                    .to_string_lossy()
+                    .replace(".onnx", "")
+                    .to_string();
+                let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+                models.push(PiperModelInfo { name, size_mb });
+            }
+        }
+    }
+
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(models)
+}
+
+#[cfg(target_os = "macos")]
+pub fn list_piper_models() -> Result<Vec<PiperModelInfo>, String> {
+    Ok(vec![])
+}
+
+#[cfg(target_os = "linux")]
+pub fn delete_piper_model(model_name: &str) -> Result<(), String> {
+    let models_dir = PiperTts::get_models_dir()?;
+
+    let model_path = models_dir.join(format!("{}.onnx", model_name));
+    let config_path = models_dir.join(format!("{}.json", model_name));
+
+    if !model_path.exists() && !config_path.exists() {
+        return Err(format!("Le modèle '{}' n'existe pas", model_name));
+    }
+
+    if model_path.exists() {
+        std::fs::remove_file(&model_path)
+            .map_err(|e| format!("Erreur suppression modèle {}: {}", model_name, e))?;
+    }
+
+    if config_path.exists() {
+        std::fs::remove_file(&config_path)
+            .map_err(|e| format!("Erreur suppression config {}: {}", model_name, e))?;
+    }
+
+    debug!("[Piper] Modèle '{}' supprimé avec succès", model_name);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn delete_piper_model(model_name: &str) -> Result<(), String> {
+    Err("Suppression des modèles Piper non supportée sur macOS".to_string())
+}
+
+#[cfg(target_os = "linux")]
+pub fn download_piper_model(model_name: &str) -> Result<(), String> {
+    let models_dir = PiperTts::get_models_dir()?;
+
+    if models_dir.join(format!("{}.onnx", model_name)).exists() {
+        return Err(format!("Le modèle '{}' est déjà installé", model_name));
+    }
+
+    debug!("[Piper] Téléchargement du modèle: {}", model_name);
+
+    let model_url = PiperTts::get_model_url(model_name);
+    let config_url = format!("{}.json", model_url);
+
+    let model_path = models_dir.join(format!("{}.onnx", model_name));
+    let config_path = models_dir.join(format!("{}.json", model_name));
+
+    download_file(&model_url, model_path.to_str().ok_or("Chemin invalide")?)?;
+    download_file(&config_url, config_path.to_str().ok_or("Chemin invalide")?)?;
+
+    debug!("[Piper] Modèle '{}' téléchargé avec succès", model_name);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn download_piper_model(_model_name: &str) -> Result<(), String> {
+    Err("Téléchargement des modèles Piper non supporté sur macOS".to_string())
 }

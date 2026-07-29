@@ -247,8 +247,13 @@ onUnmounted(() => {
         <div v-if="activeSection === 'models'" class="max-w-2xl">
           <ModelsPage
             :models="models.models.value"
+            :piper-models="models.piperModels.value"
             :loading="models.loadingModels.value"
+            :available-piper-models="models.availablePiperModels"
+            :downloading-model="models.downloadingModel.value"
             @delete="models.deleteModel"
+            @delete-piper="models.deletePiperModel"
+            @download-piper="models.downloadPiperModel"
             @refresh="models.loadModels"
           />
         </div>

@@ -10,3 +10,15 @@ export interface Model {
   name: string
   size_mb: number
 }
+
+export interface PiperModel {
+  name: string
+  size_mb: number
+}
+
+export interface AvailablePiperModel {
+  id: string
+  name: string
+  language: string
+  quality: string
+}

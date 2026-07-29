@@ -2,7 +2,7 @@
 
 **Un lecteur d'écran accessible pour les personnes dyslexiques**
 
-gsp-ui est une application de bureau open source qui convertit le texte en parole via une touche de raccourci global. Appuyez sur la touche, le texte du presse-papiers est lu à haute voix par eSpeak-NG directement sur votre ordinateur.
+gsp-ui est une application de bureau open source qui convertit le texte en parole via une touche de raccourci global. Appuyez sur la touche, le texte du presse-papiers est lu à haute voix par Piper TTS directement sur votre ordinateur.
 
 ## 📸 Aperçu
 
@@ -12,21 +12,22 @@ gsp-ui est une application de bureau open source qui convertit le texte en parol
 
 ### Système
 - **Linux (X11)** — l'application est actuellement compatible avec X11
-- **eSpeak-NG** — synthèse vocale
 - **PulseAudio** — système audio
 
 ### Installation des dépendances système
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install espeak-ng pulseaudio
+sudo apt-get install pulseaudio
 
 # Fedora/RHEL
-sudo dnf install espeak-ng pulseaudio
+sudo dnf install pulseaudio
 
 # Arch
-sudo pacman -S espeak-ng pulseaudio
+sudo pacman -S pulseaudio
 ```
+
+**Note :** Le binaire Piper TTS et les modèles vocaux sont téléchargés automatiquement au premier lancement de l'application. Aucune installation manuelle n'est requise.
 
 ## 🚀 Installation et utilisation
 

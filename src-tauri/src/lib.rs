@@ -334,6 +334,21 @@ fn delete_model(model_name: String) -> Result<(), String> {
         .map_err(|e| format!("Erreur lors de la suppression du modèle: {}", e))
 }
 
+#[tauri::command]
+fn list_piper_models() -> Result<Vec<tts::PiperModelInfo>, String> {
+    tts::list_piper_models()
+}
+
+#[tauri::command]
+fn delete_piper_model(model_name: String) -> Result<(), String> {
+    tts::delete_piper_model(&model_name)
+}
+
+#[tauri::command]
+fn download_piper_model(model_name: String) -> Result<(), String> {
+    tts::download_piper_model(&model_name)
+}
+
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
     match detected_lang {
         DetectedLanguage::English => "en",
@@ -833,7 +848,10 @@ pub fn run() {
             speak_clipboard,
             speak_ocr,
             list_models,
-            delete_model
+            delete_model,
+            list_piper_models,
+            delete_piper_model,
+            download_piper_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
