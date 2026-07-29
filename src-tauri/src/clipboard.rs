@@ -63,10 +63,12 @@ pub fn get_clipboard_text() -> Result<String, String> {
         }
     }
 
-    Err("Impossible de récupérer le texte sélectionné. Vérifiez que \
+    Err(
+        "Impossible de récupérer le texte sélectionné. Vérifiez que \
          l'application a les permissions d'accessibilité et que du texte \
          est sélectionné."
-        .to_string())
+            .to_string(),
+    )
 }
 
 #[cfg(target_os = "macos")]

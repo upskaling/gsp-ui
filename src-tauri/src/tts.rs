@@ -117,7 +117,10 @@ impl PiperTts {
         let base_url = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0";
         match model_name {
             "en_US-lessac-medium" => {
-                format!("{}/en/en_US/lessac/medium/en_US-lessac-medium.onnx", base_url)
+                format!(
+                    "{}/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+                    base_url
+                )
             }
             "fr_FR-tom-medium" => {
                 format!("{}/fr/fr_FR/tom/medium/fr_FR-tom-medium.onnx", base_url)
@@ -136,7 +139,10 @@ impl PiperTts {
             return Ok(());
         }
 
-        debug!("[Piper] Téléchargement du modèle: {}", self.get_model_name());
+        debug!(
+            "[Piper] Téléchargement du modèle: {}",
+            self.get_model_name()
+        );
         let model_name = self.get_model_name();
         let model_url = Self::get_model_url(model_name);
         let config_url = format!("{}.json", model_url);
@@ -177,11 +183,13 @@ impl TtsEngine for PiperTts {
 
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            stdin.write_all(text.as_bytes())
+            stdin
+                .write_all(text.as_bytes())
                 .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
         }
 
-        let result = child.wait_with_output()
+        let result = child
+            .wait_with_output()
             .map_err(|e| format!("Erreur attente piper: {}", e));
 
         match result {
@@ -280,7 +288,10 @@ fn get_macos_available_voices() -> Result<Vec<(String, String)>, String> {
         if parts.len() >= 2 {
             let name = parts[0].to_string();
             let mut lang = parts[1].to_string();
-            lang = lang.trim_start_matches('(').trim_end_matches(&[')', ','][..]).to_string();
+            lang = lang
+                .trim_start_matches('(')
+                .trim_end_matches(&[')', ','][..])
+                .to_string();
             if !lang.is_empty() && lang != "#" {
                 voices.entry(name).or_default().push(lang);
             }
@@ -370,8 +381,8 @@ fn download_file(url: &str, dest: &str) -> Result<(), String> {
         .call()
         .map_err(|e| format!("Erreur téléchargement: {}", e))?;
 
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| format!("Erreur création fichier: {}", e))?;
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| format!("Erreur création fichier: {}", e))?;
 
     std::io::copy(&mut response.into_reader(), &mut file)
         .map_err(|e| format!("Erreur copie fichier: {}", e))?;
@@ -440,11 +451,13 @@ impl TtsEngine for EspeakNgTts {
 
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            stdin.write_all(text.as_bytes())
+            stdin
+                .write_all(text.as_bytes())
                 .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
         }
 
-        let result = child.wait_with_output()
+        let result = child
+            .wait_with_output()
             .map_err(|e| format!("Erreur attente espeak-ng: {}", e));
 
         match result {
@@ -485,7 +498,10 @@ pub fn create_tts_engine(model_selection: Option<&str>) -> Box<dyn TtsEngine> {
     {
         match model_selection {
             Some(selection) if selection.starts_with("macos:") => {
-                let voice = selection.strip_prefix("macos:").and_then(|s| s.split(':').next()).unwrap_or("Thomas");
+                let voice = selection
+                    .strip_prefix("macos:")
+                    .and_then(|s| s.split(':').next())
+                    .unwrap_or("Thomas");
                 Box::new(MacOsTts::with_voice(voice.to_string()))
             }
             _ => Box::new(MacOsTts::new()),
@@ -547,10 +563,7 @@ pub fn list_piper_models() -> Result<Vec<PiperModelInfo>, String> {
         if path.is_file() && path.extension().is_some_and(|ext| ext == "onnx") {
             if let Ok(metadata) = std::fs::metadata(&path) {
                 let file_name = entry.file_name();
-                let name = file_name
-                    .to_string_lossy()
-                    .replace(".onnx", "")
-                    .to_string();
+                let name = file_name.to_string_lossy().replace(".onnx", "").to_string();
                 let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
                 models.push(PiperModelInfo { name, size_mb });
             }
@@ -748,7 +761,9 @@ pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
 
                     // Voix espeak intégrées (fr, en-us, en-gb, etc.)
                     for voice in available_voices {
-                        if (voice.contains("fr") || voice.contains("en")) && !voice.starts_with("mb-") {
+                        if (voice.contains("fr") || voice.contains("en"))
+                            && !voice.starts_with("mb-")
+                        {
                             let id = format!("espeak-ng:{}", voice);
                             let label = format!("eSpeak-NG: {} (builtin)", voice);
 

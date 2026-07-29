@@ -54,6 +54,16 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     Ok(Image::new(static_data, width, height))
 }
 
+#[cfg(target_os = "macos")]
+fn show_main_window(app: &AppHandle) {
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.unminimize();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
+}
+
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
     info!("Début de setup_global_shortcut()");
 
@@ -503,9 +513,7 @@ fn execute_speech_pipeline(
 
     debug!("[{}] Création du TTS engine", log_tag);
     let config = load_config().ok();
-    let model_selection = config
-        .as_ref()
-        .map(|c| c.tts_model_selection.as_str());
+    let model_selection = config.as_ref().map(|c| c.tts_model_selection.as_str());
     let mut tts = tts::create_tts_engine(model_selection);
 
     // Déterminer la langue du TTS en fonction du texte final (potentiellement traduit)
@@ -871,7 +879,14 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                window.hide().unwrap();
+                let _ = window.hide();
+
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -911,8 +926,15 @@ pub fn run() {
             load_tts_model_selection,
             save_tts_model_selection
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|#[allow(unused_variables)] app, event| match &event {
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                show_main_window(app);
+            }
+            _ => {}
+        });
 }
 
 #[cfg(test)]
