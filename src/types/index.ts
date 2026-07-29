@@ -22,3 +22,11 @@ export interface AvailablePiperModel {
   language: string
   quality: string
 }
+
+export interface TtsModel {
+  id: string
+  engine: 'piper' | 'espeak-ng'
+  name: string
+  label: string
+  installed: boolean
+}

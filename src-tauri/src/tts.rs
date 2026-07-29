@@ -354,6 +354,15 @@ pub struct PiperModelInfo {
     pub size_mb: f64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct TtsModel {
+    pub id: String,
+    pub engine: String,
+    pub name: String,
+    pub label: String,
+    pub installed: bool,
+}
+
 #[cfg(target_os = "linux")]
 pub fn list_piper_models() -> Result<Vec<PiperModelInfo>, String> {
     let models_dir = PiperTts::get_models_dir()?;
@@ -446,4 +455,59 @@ pub fn download_piper_model(model_name: &str) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 pub fn download_piper_model(_model_name: &str) -> Result<(), String> {
     Err("Téléchargement des modèles Piper non supporté sur macOS".to_string())
+}
+
+pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
+    let mut models = Vec::new();
+
+    // Piper models
+    let piper_models = vec![
+        ("fr_FR-tom-medium", "Piper: Français (Tom)"),
+        ("en_US-lessac-medium", "Piper: English (Lessac)"),
+    ];
+
+    for (model_name, label) in piper_models {
+        let id = format!("piper:{}", model_name);
+        #[cfg(target_os = "linux")]
+        let installed = {
+            let models_dir = PiperTts::get_models_dir().ok();
+            let path = models_dir
+                .as_ref()
+                .map(|d| d.join(format!("{}.onnx", model_name)));
+            path.map(|p| p.exists()).unwrap_or(false)
+        };
+
+        #[cfg(target_os = "macos")]
+        let installed = false;
+
+        models.push(TtsModel {
+            id,
+            engine: "piper".to_string(),
+            name: model_name.to_string(),
+            label: label.to_string(),
+            installed,
+        });
+    }
+
+    // espeak-ng models (placeholder for future implementation)
+    let espeak_models = vec![
+        ("mb-FR4", "eSpeak-NG: Français (FR4)"),
+        ("mb-EN5", "eSpeak-NG: English (EN5)"),
+    ];
+
+    for (model_name, label) in espeak_models {
+        let id = format!("espeak-ng:{}", model_name);
+        // TODO: Implement espeak-ng model checking when it's integrated
+        let installed = false;
+
+        models.push(TtsModel {
+            id,
+            engine: "espeak-ng".to_string(),
+            name: model_name.to_string(),
+            label: label.to_string(),
+            installed,
+        });
+    }
+
+    Ok(models)
 }

@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub source_language: String,
     #[serde(default)]
     pub target_language: String,
+    #[serde(default)]
+    pub tts_model_selection: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -67,6 +69,7 @@ impl Default for AppConfig {
             dev_mode: false,
             source_language: "auto".to_string(),
             target_language: "fr".to_string(),
+            tts_model_selection: "piper:fr_FR-tom-medium".to_string(),
         }
     }
 }

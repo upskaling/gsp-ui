@@ -349,6 +349,21 @@ fn download_piper_model(model_name: String) -> Result<(), String> {
     tts::download_piper_model(&model_name)
 }
 
+#[tauri::command]
+fn get_available_tts_models() -> Result<Vec<tts::TtsModel>, String> {
+    tts::get_available_tts_models()
+}
+
+#[tauri::command]
+fn load_tts_model_selection() -> Result<String, String> {
+    load_config().map(|cfg| cfg.tts_model_selection)
+}
+
+#[tauri::command]
+fn save_tts_model_selection(model_id: String) -> Result<(), String> {
+    update_config(|cfg| cfg.tts_model_selection = model_id)
+}
+
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
     match detected_lang {
         DetectedLanguage::English => "en",
@@ -851,7 +866,10 @@ pub fn run() {
             delete_model,
             list_piper_models,
             delete_piper_model,
-            download_piper_model
+            download_piper_model,
+            get_available_tts_models,
+            load_tts_model_selection,
+            save_tts_model_selection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

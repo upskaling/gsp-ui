@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { LanguageOption } from '@/composables/useLanguage'
+import type { TtsModel } from '@/types'
 
 interface Props {
   isSpeaking: boolean
   playbackSpeed: number
   speedOptions: number[]
   sourceLanguage: string
-  targetLanguage: string
+  ttsModels: TtsModel[]
+  selectedTtsModel: string
   sourceLanguageOptions: LanguageOption[]
-  targetLanguageOptions: LanguageOption[]
 }
 
 interface Emits {
@@ -17,7 +18,7 @@ interface Emits {
   (e: 'stop'): void
   (e: 'speed-change', speed: number): void
   (e: 'source-language-change', lang: string): void
-  (e: 'target-language-change', lang: string): void
+  (e: 'tts-model-change', modelId: string): void
 }
 
 withDefaults(defineProps<Props>(), {})
@@ -90,18 +91,21 @@ defineEmits<Emits>()
         </select>
       </div>
 
-      <!-- Target language -->
+      <!-- TTS Model selection -->
       <div class="flex items-center gap-2">
-        <label for="target-lang" class="text-sm font-medium">Parler:</label>
+        <label for="tts-model" class="text-sm font-medium">Parler:</label>
         <select
-          id="target-lang"
-          :value="targetLanguage"
-          @change="(e) => $emit('target-language-change', (e.target as HTMLSelectElement).value)"
-          :disabled="isSpeaking"
+          id="tts-model"
+          :value="selectedTtsModel"
+          @change="(e) => $emit('tts-model-change', (e.target as HTMLSelectElement).value)"
+          :disabled="isSpeaking || ttsModels.length === 0"
           class="px-3 py-1 rounded border border-mid-gray/20 bg-background text-text disabled:opacity-50"
         >
-          <option v-for="lang in targetLanguageOptions" :key="lang.code" :value="lang.code">
-            {{ lang.label }}
+          <option v-for="model in ttsModels.filter((m) => m.installed)" :key="model.id" :value="model.id">
+            {{ model.label }}
+          </option>
+          <option v-if="ttsModels.filter((m) => m.installed).length === 0" disabled>
+            Aucun modèle installé
           </option>
         </select>
       </div>

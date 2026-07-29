@@ -14,6 +14,7 @@ import { usePlayback } from './composables/usePlayback'
 import { useShortcuts } from './composables/useShortcuts'
 import { useModels } from './composables/useModels'
 import { useLanguage } from './composables/useLanguage'
+import { useTtsModels } from './composables/useTtsModels'
 import { useKeyRecording } from './composables/useKeyRecording'
 
 const appVersion = '0.1.0'
@@ -27,6 +28,7 @@ const playback = usePlayback()
 const shortcuts = useShortcuts()
 const models = useModels()
 const language = useLanguage()
+const ttsModels = useTtsModels()
 const keyRecording = useKeyRecording(shortcuts)
 
 async function loadDevMode() {
@@ -56,7 +58,8 @@ onMounted(async () => {
   await shortcuts.loadShortcutConfig()
   await shortcuts.loadOCRShortcutConfig()
   await language.loadSourceLanguage()
-  await language.loadTargetLanguage()
+  await ttsModels.loadAvailableTtsModels()
+  await ttsModels.loadSelectedTtsModel()
   await loadDevMode()
   await models.loadModels()
 
@@ -178,15 +181,15 @@ onUnmounted(() => {
             :playback-speed="playback.playbackSpeed.value"
             :speed-options="playback.speedOptions"
             :source-language="language.sourceLanguage.value"
-            :target-language="language.targetLanguage.value"
+            :tts-models="ttsModels.availableTtsModels.value"
+            :selected-tts-model="ttsModels.selectedTtsModel.value"
             :source-language-options="language.sourceLanguageOptions"
-            :target-language-options="language.targetLanguageOptions"
             @speak="playback.speakSelection"
             @speak-ocr="playback.speakOCR"
             @stop="playback.stopSpeaking"
             @speed-change="playback.setPlaybackSpeed"
             @source-language-change="language.setSourceLanguage"
-            @target-language-change="language.setTargetLanguage"
+            @tts-model-change="ttsModels.setTtsModel"
           />
 
           <!-- Dev Mode Toggle (debug only) -->
