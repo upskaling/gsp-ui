@@ -254,10 +254,13 @@ onUnmounted(() => {
             :loading="models.loadingModels.value"
             :available-piper-models="models.availablePiperModels"
             :downloading-model="models.downloadingModel.value"
+            :available-tts-models="ttsModels.availableTtsModels.value"
+            :selected-tts-model="ttsModels.selectedTtsModel.value"
             @delete="models.deleteModel"
             @delete-piper="models.deletePiperModel"
             @download-piper="models.downloadPiperModel"
             @refresh="models.loadModels"
+            @tts-model-change="ttsModels.setTtsModel"
           />
         </div>
 

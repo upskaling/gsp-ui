@@ -477,7 +477,11 @@ fn execute_speech_pipeline(
     }
 
     debug!("[{}] Création du TTS engine", log_tag);
-    let mut tts = tts::create_tts_engine();
+    let config = load_config().ok();
+    let model_selection = config
+        .as_ref()
+        .map(|c| c.tts_model_selection.as_str());
+    let mut tts = tts::create_tts_engine(model_selection);
 
     // Déterminer la langue du TTS en fonction du texte final (potentiellement traduit)
     let tts_lang = if input.source_lang == "auto" {

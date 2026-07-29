@@ -324,15 +324,120 @@ fn download_file(url: &str, dest: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Crée une instance du moteur TTS appropriée à la plateforme
-pub fn create_tts_engine() -> Box<dyn TtsEngine> {
+/// Configuration du moteur espeak-ng TTS (Linux)
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub struct EspeakNgTts {
+    lang: String,
+    speed: f32,
+    output_file: String,
+}
+
+#[cfg(target_os = "linux")]
+impl Default for EspeakNgTts {
+    fn default() -> Self {
+        Self {
+            lang: "fr".to_string(),
+            speed: 1.0,
+            output_file: "/dev/shm/out.wav".to_string(),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl EspeakNgTts {
+    pub fn with_voice(voice: String) -> Self {
+        Self {
+            lang: voice,
+            speed: 1.0,
+            output_file: "/dev/shm/out.wav".to_string(),
+        }
+    }
+
+    fn get_voice(&self) -> &str {
+        &self.lang
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl TtsEngine for EspeakNgTts {
+    fn speak(&mut self, text: &str) -> Result<String, String> {
+        debug!(
+            "[EspeakNg] Synthèse vocale - texte: '{}', voix: {}, vitesse: {}",
+            text,
+            self.get_voice(),
+            self.speed
+        );
+
+        let speed_arg = (self.speed * 150.0) as i32;
+
+        let mut child = Command::new("espeak-ng")
+            .arg("-v")
+            .arg(self.get_voice())
+            .arg("-s")
+            .arg(speed_arg.to_string())
+            .arg("-w")
+            .arg(&self.output_file)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Erreur spawn espeak-ng: {}", e))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(text.as_bytes())
+                .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
+        }
+
+        let result = child.wait_with_output()
+            .map_err(|e| format!("Erreur attente espeak-ng: {}", e));
+
+        match result {
+            Ok(output) => {
+                debug!(
+                    "[EspeakNg] Résultat espeak-ng - status: {}, stderr: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+
+                if !output.status.success() {
+                    return Err(format!(
+                        "Erreur espeak-ng: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
+                }
+
+                debug!("[EspeakNg] Audio généré: {}", self.output_file);
+                Ok(self.output_file.clone())
+            }
+            Err(e) => Err(format!("Erreur lors de l'exécution d'espeak-ng: {}", e)),
+        }
+    }
+
+    fn set_lang(&mut self, _lang: String) {
+        // Pour espeak-ng, la langue/voix est déjà configurée via `lang` au moment de la création
+        // On ne la change pas dynamiquement
+    }
+
+    fn set_speed(&mut self, speed: i32) {
+        self.speed = (speed as f32 / 100.0).clamp(0.5, 2.0);
+    }
+}
+
+/// Crée une instance du moteur TTS appropriée à la plateforme et au modèle sélectionné
+pub fn create_tts_engine(model_selection: Option<&str>) -> Box<dyn TtsEngine> {
     #[cfg(target_os = "macos")]
     {
         Box::new(MacOsTts::new())
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(PiperTts::new())
+        match model_selection {
+            Some(selection) if selection.starts_with("espeak-ng:") => {
+                let voice = selection.strip_prefix("espeak-ng:").unwrap_or("mb-EN5");
+                Box::new(EspeakNgTts::with_voice(voice.to_string()))
+            }
+            _ => Box::new(PiperTts::new()),
+        }
     }
 }
 
@@ -457,6 +562,80 @@ pub fn download_piper_model(_model_name: &str) -> Result<(), String> {
     Err("Téléchargement des modèles Piper non supporté sur macOS".to_string())
 }
 
+fn is_espeak_ng_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("espeak-ng")
+            .arg("--version")
+            .output()
+            .ok()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn get_espeak_ng_available_voices() -> Result<Vec<String>, String> {
+    let output = Command::new("espeak-ng")
+        .arg("--voices")
+        .output()
+        .map_err(|e| format!("Erreur lecture voix espeak-ng: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Impossible de lister les voix espeak-ng".to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut voices = Vec::new();
+
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let lang_code = parts[1].trim();
+            if !lang_code.is_empty() && lang_code != "Language" {
+                voices.push(lang_code.to_string());
+            }
+        }
+    }
+
+    debug!("[EspeakNg] Voix disponibles: {:?}", voices);
+    Ok(voices)
+}
+
+#[cfg(target_os = "linux")]
+fn get_mbrola_voices_installed() -> Vec<String> {
+    let mut mbrola_voices = Vec::new();
+
+    let paths = vec![
+        std::path::PathBuf::from("/usr/share/mbrola"),
+        std::path::PathBuf::from("/usr/local/share/mbrola"),
+    ];
+
+    for base_path in paths {
+        if let Ok(entries) = std::fs::read_dir(&base_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                        let voice_id = format!("mb-{}", dir_name.to_uppercase());
+                        if !mbrola_voices.contains(&voice_id) {
+                            mbrola_voices.push(voice_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    mbrola_voices.sort();
+    debug!("[EspeakNg] Voix mbrola installées: {:?}", mbrola_voices);
+    mbrola_voices
+}
+
 pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
     let mut models = Vec::new();
 
@@ -489,24 +668,49 @@ pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
         });
     }
 
-    // espeak-ng models (placeholder for future implementation)
-    let espeak_models = vec![
-        ("mb-FR4", "eSpeak-NG: Français (FR4)"),
-        ("mb-EN5", "eSpeak-NG: English (EN5)"),
-    ];
+    // espeak-ng voices - détection dynamique
+    #[cfg(target_os = "linux")]
+    {
+        if is_espeak_ng_available() {
+            match get_espeak_ng_available_voices() {
+                Ok(available_voices) => {
+                    let mbrola_installed = get_mbrola_voices_installed();
 
-    for (model_name, label) in espeak_models {
-        let id = format!("espeak-ng:{}", model_name);
-        // TODO: Implement espeak-ng model checking when it's integrated
-        let installed = false;
+                    // Voix mbrola installées
+                    for mbrola_voice in mbrola_installed {
+                        let id = format!("espeak-ng:{}", mbrola_voice);
+                        let label = format!("eSpeak-NG: {} (Multibande)", mbrola_voice);
 
-        models.push(TtsModel {
-            id,
-            engine: "espeak-ng".to_string(),
-            name: model_name.to_string(),
-            label: label.to_string(),
-            installed,
-        });
+                        models.push(TtsModel {
+                            id,
+                            engine: "espeak-ng".to_string(),
+                            name: mbrola_voice,
+                            label,
+                            installed: true,
+                        });
+                    }
+
+                    // Voix espeak intégrées (fr, en-us, en-gb, etc.)
+                    for voice in available_voices {
+                        if (voice.contains("fr") || voice.contains("en")) && !voice.starts_with("mb-") {
+                            let id = format!("espeak-ng:{}", voice);
+                            let label = format!("eSpeak-NG: {} (builtin)", voice);
+
+                            models.push(TtsModel {
+                                id,
+                                engine: "espeak-ng".to_string(),
+                                name: voice,
+                                label,
+                                installed: true,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("[EspeakNg] Erreur lors de la lecture des voix: {}", e);
+                }
+            }
+        }
     }
 
     Ok(models)

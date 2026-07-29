@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { AvailablePiperModel, Model, PiperModel } from '@/types'
+import type { AvailablePiperModel, Model, PiperModel, TtsModel } from '@/types'
 
 type TabType = 'tts' | 'translation'
 
@@ -10,6 +10,8 @@ interface Props {
   loading: boolean
   availablePiperModels: AvailablePiperModel[]
   downloadingModel: string | null
+  availableTtsModels?: TtsModel[]
+  selectedTtsModel?: string
 }
 
 interface Emits {
@@ -17,9 +19,13 @@ interface Emits {
   (e: 'delete-piper', modelName: string): void
   (e: 'download-piper', modelId: string): void
   (e: 'refresh'): void
+  (e: 'tts-model-change', modelId: string): void
 }
 
-withDefaults(defineProps<Props>(), {})
+withDefaults(defineProps<Props>(), {
+  availableTtsModels: () => [],
+  selectedTtsModel: 'piper:fr_FR-tom-medium'
+})
 defineEmits<Emits>()
 
 const activeTab = ref<TabType>('tts')
@@ -59,6 +65,31 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
 
     <!-- TTS Models Tab -->
     <div v-if="activeTab === 'tts'" class="space-y-6">
+      <!-- Sélection du moteur TTS -->
+      <div class="p-4 border border-mid-gray/20 rounded-lg">
+        <h3 class="font-semibold mb-4">Moteur TTS</h3>
+        <div class="space-y-3">
+          <div v-for="model in availableTtsModels" :key="model.id" class="flex items-center gap-3 p-3 border border-mid-gray/20 rounded cursor-pointer hover:bg-mid-gray/5 transition"
+            :class="{ 'border-logo-primary/50 bg-logo-primary/5': selectedTtsModel === model.id }"
+            @click="$emit('tts-model-change', model.id)">
+            <input
+              type="radio"
+              :id="`tts-${model.id}`"
+              :value="model.id"
+              :checked="selectedTtsModel === model.id"
+              @change="$emit('tts-model-change', model.id)"
+              class="cursor-pointer"
+            />
+            <label :for="`tts-${model.id}`" class="flex-1 cursor-pointer">
+              <p class="font-medium text-sm">{{ model.label }}</p>
+              <p class="text-xs text-mid-gray">{{ model.engine }}</p>
+              <p v-if="model.installed" class="text-xs text-green-500/80">✓ Installé</p>
+              <p v-else class="text-xs text-mid-gray">Non disponible</p>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- Modèles TTS installés -->
       <div class="p-4 border border-mid-gray/20 rounded-lg">
         <div class="flex items-center justify-between mb-4">
