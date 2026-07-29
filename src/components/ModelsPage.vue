@@ -69,7 +69,7 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
       <div class="p-4 border border-mid-gray/20 rounded-lg">
         <h3 class="font-semibold mb-4">Moteur TTS</h3>
         <div class="space-y-3">
-          <div v-for="model in availableTtsModels" :key="model.id" class="flex items-center gap-3 p-3 border border-mid-gray/20 rounded cursor-pointer hover:bg-mid-gray/5 transition"
+          <div v-for="model in availableTtsModels.filter(m => m.installed)" :key="model.id" class="flex items-center gap-3 p-3 border border-mid-gray/20 rounded cursor-pointer hover:bg-mid-gray/5 transition"
             :class="{ 'border-logo-primary/50 bg-logo-primary/5': selectedTtsModel === model.id }"
             @click="$emit('tts-model-change', model.id)">
             <input
@@ -83,8 +83,7 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
             <label :for="`tts-${model.id}`" class="flex-1 cursor-pointer">
               <p class="font-medium text-sm">{{ model.label }}</p>
               <p class="text-xs text-mid-gray">{{ model.engine }}</p>
-              <p v-if="model.installed" class="text-xs text-green-500/80">✓ Installé</p>
-              <p v-else class="text-xs text-mid-gray">Non disponible</p>
+              <p class="text-xs text-green-500/80">✓ Installé</p>
             </label>
           </div>
         </div>
