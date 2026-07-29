@@ -55,6 +55,7 @@ async function toggleDevMode() {
 onMounted(async () => {
   // Load all configurations
   await playback.loadPlaybackSpeed()
+  await playback.loadVolume()
   await shortcuts.loadShortcutConfig()
   await shortcuts.loadOCRShortcutConfig()
   await language.loadSourceLanguage()
@@ -180,6 +181,7 @@ onUnmounted(() => {
             :is-speaking="playback.isSpeaking.value"
             :playback-speed="playback.playbackSpeed.value"
             :speed-options="playback.speedOptions"
+            :volume="playback.volume.value"
             :source-language="language.sourceLanguage.value"
             :tts-models="ttsModels.availableTtsModels.value"
             :selected-tts-model="ttsModels.selectedTtsModel.value"
@@ -188,6 +190,7 @@ onUnmounted(() => {
             @speak-ocr="playback.speakOCR"
             @stop="playback.stopSpeaking"
             @speed-change="playback.setPlaybackSpeed"
+            @volume-change="playback.setVolume"
             @source-language-change="language.setSourceLanguage"
             @tts-model-change="ttsModels.setTtsModel"
           />

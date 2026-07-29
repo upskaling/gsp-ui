@@ -5,6 +5,7 @@ export function usePlayback() {
   const isSpeaking = ref(false)
   const playbackSpeed = ref(1.0)
   const speedOptions = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
+  const volume = ref(1.0)
 
   async function speakSelection() {
     console.log('[speakSelection] Début')
@@ -66,14 +67,46 @@ export function usePlayback() {
     }
   }
 
+  async function loadVolume() {
+    try {
+      volume.value = await invoke('load_volume')
+      console.log('[loadVolume] Volume chargé:', volume.value)
+    } catch (error) {
+      console.error('Erreur lors du chargement du volume:', error)
+    }
+  }
+
+  async function setVolume(newVolume: number) {
+    console.log('[setVolume] Nouveau volume:', newVolume)
+    volume.value = newVolume
+    try {
+      // Essayer de changer le volume en cours de lecture
+      try {
+        await invoke('set_playing_volume', { volume: newVolume })
+        console.log('[setVolume] Volume de lecture mis à jour')
+      } catch (error) {
+        console.log('[setVolume] Aucune lecture en cours:', error)
+      }
+
+      // Toujours sauvegarder la préférence
+      await invoke('save_volume', { volume: newVolume })
+      console.log('[setVolume] Volume sauvegardé')
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde du volume:', error)
+    }
+  }
+
   return {
     isSpeaking,
     playbackSpeed,
     speedOptions,
+    volume,
     speakSelection,
     speakOCR,
     stopSpeaking,
     loadPlaybackSpeed,
     setPlaybackSpeed,
+    loadVolume,
+    setVolume,
   }
 }

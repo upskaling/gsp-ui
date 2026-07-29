@@ -17,6 +17,7 @@ use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use screenshooter::screenshot_region;
+use std::process::Command;
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
@@ -31,6 +32,7 @@ struct AudioPlayback {
     _device_sink: Box<dyn std::any::Any + Send>,
     #[allow(dead_code)]
     thread_id: u128,
+    sink_input_index: Option<u32>,
 }
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
@@ -279,6 +281,34 @@ fn save_playback_speed(speed: f32) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn load_volume() -> Result<f32, String> {
+    load_config().map(|cfg| cfg.volume)
+}
+
+#[tauri::command]
+fn save_volume(volume: f32) -> Result<(), String> {
+    update_config(|cfg| cfg.volume = volume.clamp(0.0, 1.0))
+}
+
+#[tauri::command]
+fn set_playing_volume(volume: f32) -> Result<(), String> {
+    let sink_guard = CURRENT_SINK
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
+
+    if let Some(playback) = sink_guard.as_ref() {
+        if let Some(index) = playback.sink_input_index {
+            set_pulseaudio_volume(index, volume.clamp(0.0, 1.0));
+            Ok(())
+        } else {
+            Err("Index du sink input non disponible".to_string())
+        }
+    } else {
+        Err("Aucune lecture en cours".to_string())
+    }
+}
+
+#[tauri::command]
 fn load_dev_mode() -> Result<bool, String> {
     load_config().map(|cfg| cfg.dev_mode)
 }
@@ -433,7 +463,33 @@ struct SpeechPipelineInput {
     source_lang: String,
     target_lang: String,
     playback_speed: f32,
+    volume: f32,
     dev_mode: bool,
+}
+
+fn get_latest_sink_input_index() -> Option<u32> {
+    let output = Command::new("pactl")
+        .args(["list", "short", "sink-inputs"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .last()
+        .and_then(|line| line.split('\t').next())
+        .and_then(|idx| idx.parse::<u32>().ok())
+}
+
+fn set_pulseaudio_volume(sink_input_index: u32, volume: f32) {
+    let _ = Command::new("pactl")
+        .args(["set-sink-input-volume", &sink_input_index.to_string(), &format!("{}%", (volume * 100.0) as u32)])
+        .output();
+    debug!("[set_pulseaudio_volume] Volume du sink input {} mis à jour à {}%", sink_input_index, (volume * 100.0) as u32);
 }
 
 fn execute_speech_pipeline(
@@ -543,7 +599,14 @@ fn execute_speech_pipeline(
         .map_err(|e| format!("Erreur lors de l'ouverture du fichier: {}", e))?;
     let source = Decoder::new(file)
         .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
+
     player.append(source);
+
+    // Appliquer le volume initial via PulseAudio
+    let sink_input_index = get_latest_sink_input_index();
+    if let Some(index) = sink_input_index {
+        set_pulseaudio_volume(index, input.volume);
+    }
 
     let thread_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -558,6 +621,7 @@ fn execute_speech_pipeline(
             player,
             _device_sink: Box::new(device_sink),
             thread_id,
+            sink_input_index,
         });
     }
 
@@ -647,12 +711,14 @@ fn speak(
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang,
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
@@ -735,12 +801,14 @@ fn speak_ocr(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Resul
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang: source_lang.to_string(),
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
@@ -796,12 +864,14 @@ fn speak_clipboard(
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang,
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
@@ -848,6 +918,9 @@ pub fn run() {
             save_ocr_shortcut_config,
             load_playback_speed,
             save_playback_speed,
+            load_volume,
+            save_volume,
+            set_playing_volume,
             load_dev_mode,
             save_dev_mode,
             load_source_language,

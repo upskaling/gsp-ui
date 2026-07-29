@@ -6,6 +6,7 @@ interface Props {
   isSpeaking: boolean
   playbackSpeed: number
   speedOptions: number[]
+  volume: number
   sourceLanguage: string
   ttsModels: TtsModel[]
   selectedTtsModel: string
@@ -17,6 +18,7 @@ interface Emits {
   (e: 'speak-ocr'): void
   (e: 'stop'): void
   (e: 'speed-change', speed: number): void
+  (e: 'volume-change', volume: number): void
   (e: 'source-language-change', lang: string): void
   (e: 'tts-model-change', modelId: string): void
 }
@@ -73,6 +75,22 @@ defineEmits<Emits>()
             {{ speed }}x
           </option>
         </select>
+      </div>
+
+      <!-- Volume control -->
+      <div class="flex items-center gap-2">
+        <label for="volume-slider" class="text-sm font-medium">🔊 Volume:</label>
+        <input
+          id="volume-slider"
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          :value="volume"
+          @input="(e) => $emit('volume-change', parseFloat((e.target as HTMLInputElement).value))"
+          class="w-24"
+        />
+        <span class="text-sm text-mid-gray w-12">{{ Math.round(volume * 100) }}%</span>
       </div>
 
       <!-- Source language -->

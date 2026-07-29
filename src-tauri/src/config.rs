@@ -13,6 +13,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub playback_speed: f32,
     #[serde(default)]
+    pub volume: f32,
+    #[serde(default)]
     pub dev_mode: bool,
     #[serde(default)]
     pub source_language: String,
@@ -66,6 +68,7 @@ impl Default for AppConfig {
                 key: "o".to_string(),
             },
             playback_speed: 1.0,
+            volume: 1.0,
             dev_mode: false,
             source_language: "auto".to_string(),
             target_language: "fr".to_string(),
