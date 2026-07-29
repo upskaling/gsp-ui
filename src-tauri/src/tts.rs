@@ -219,6 +219,7 @@ impl TtsEngine for PiperTts {
 #[cfg(target_os = "macos")]
 #[derive(Debug, Clone)]
 pub struct MacOsTts {
+    voice: String,
     lang: String,
     speed: i32,
 }
@@ -227,6 +228,7 @@ pub struct MacOsTts {
 impl Default for MacOsTts {
     fn default() -> Self {
         Self {
+            voice: "Thomas".to_string(),
             lang: "fr".to_string(),
             speed: 200,
         }
@@ -239,12 +241,65 @@ impl MacOsTts {
         Self::default()
     }
 
-    fn get_voice(&self) -> &str {
-        match self.lang.as_str() {
-            "en" => "Samantha",
-            _ => "Thomas",
+    pub fn with_voice(voice: String) -> Self {
+        Self {
+            voice,
+            lang: "fr".to_string(),
+            speed: 200,
         }
     }
+
+    fn get_voice(&self) -> &str {
+        &self.voice
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn get_macos_available_voices() -> Result<Vec<(String, String)>, String> {
+    let output = Command::new("say")
+        .arg("-v")
+        .arg("?")
+        .output()
+        .map_err(|e| format!("Erreur lecture voix macOS: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Impossible de lister les voix macOS".to_string());
+    }
+
+    use std::collections::HashMap;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut voices: HashMap<String, Vec<String>> = HashMap::new();
+
+    for line in stdout.lines().skip(1) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let name = parts[0].to_string();
+            let mut lang = parts[1].to_string();
+            lang = lang.trim_start_matches('(').trim_end_matches(&[')', ','][..]).to_string();
+            if !lang.is_empty() && lang != "#" {
+                voices.entry(name).or_default().push(lang);
+            }
+        }
+    }
+
+    let mut result: Vec<(String, String)> = voices
+        .into_iter()
+        .map(|(name, langs)| {
+            let mut unique_langs: Vec<&str> = langs.iter().map(String::as_str).collect();
+            unique_langs.sort();
+            unique_langs.dedup();
+            (name, unique_langs.join(", "))
+        })
+        .collect();
+
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    debug!("[MacOsTts] Voix disponibles: {:?}", result);
+    Ok(result)
 }
 
 #[cfg(target_os = "macos")]
@@ -307,6 +362,7 @@ impl TtsEngine for MacOsTts {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn download_file(url: &str, dest: &str) -> Result<(), String> {
     debug!("[Download] Téléchargement de: {}", url);
 
@@ -427,7 +483,13 @@ impl TtsEngine for EspeakNgTts {
 pub fn create_tts_engine(model_selection: Option<&str>) -> Box<dyn TtsEngine> {
     #[cfg(target_os = "macos")]
     {
-        Box::new(MacOsTts::new())
+        match model_selection {
+            Some(selection) if selection.starts_with("macos:") => {
+                let voice = selection.strip_prefix("macos:").and_then(|s| s.split(':').next()).unwrap_or("Thomas");
+                Box::new(MacOsTts::with_voice(voice.to_string()))
+            }
+            _ => Box::new(MacOsTts::new()),
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -530,7 +592,7 @@ pub fn delete_piper_model(model_name: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn delete_piper_model(model_name: &str) -> Result<(), String> {
+pub fn delete_piper_model(_model_name: &str) -> Result<(), String> {
     Err("Suppression des modèles Piper non supportée sur macOS".to_string())
 }
 
@@ -562,20 +624,14 @@ pub fn download_piper_model(_model_name: &str) -> Result<(), String> {
     Err("Téléchargement des modèles Piper non supporté sur macOS".to_string())
 }
 
+#[cfg(target_os = "linux")]
 fn is_espeak_ng_available() -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("espeak-ng")
-            .arg("--version")
-            .output()
-            .ok()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        false
-    }
+    Command::new("espeak-ng")
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(target_os = "linux")]
@@ -709,6 +765,31 @@ pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
                 Err(e) => {
                     debug!("[EspeakNg] Erreur lors de la lecture des voix: {}", e);
                 }
+            }
+        }
+    }
+
+    // macOS voices - détection dynamique via `say -v '?'`
+    #[cfg(target_os = "macos")]
+    {
+        match get_macos_available_voices() {
+            Ok(available_voices) => {
+                for (name, lang) in available_voices {
+                    for single_lang in lang.split(", ") {
+                        let id = format!("macos:{}:{}", name, single_lang);
+                        let label = format!("macOS: {} ({})", name, single_lang);
+                        models.push(TtsModel {
+                            id,
+                            engine: "macos".to_string(),
+                            name: name.clone(),
+                            label,
+                            installed: true,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                debug!("[MacOsTts] Erreur lors de la lecture des voix: {}", e);
             }
         }
     }

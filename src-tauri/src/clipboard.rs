@@ -22,10 +22,26 @@ pub fn get_clipboard_text() -> Result<String, String> {
 }
 
 #[cfg(target_os = "macos")]
+fn has_accessibility_permission() -> bool {
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(target_os = "macos")]
 pub fn get_clipboard_text() -> Result<String, String> {
     use arboard::Clipboard;
     use std::thread;
     use std::time::Duration;
+
+    if !has_accessibility_permission() {
+        return Err(
+            "Permission d'accessibilité requise. Ajoutez l'application dans \
+             Réglages Système > Confidentialité > Accessibilité"
+                .to_string(),
+        );
+    }
 
     let mut clipboard =
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
@@ -34,11 +50,11 @@ pub fn get_clipboard_text() -> Result<String, String> {
 
     simulate_cmd_c()?;
 
-    for _ in 0..50 {
+    for _ in 0..100 {
         thread::sleep(Duration::from_millis(10));
 
         if let Ok(text) = clipboard.get_text() {
-            if saved_text.as_ref() != Some(&text) && !text.is_empty() {
+            if !text.is_empty() && saved_text.as_ref().map_or(true, |s| s != &text) {
                 if let Some(ref saved) = saved_text {
                     let _ = clipboard.set_text(saved);
                 }
@@ -47,7 +63,10 @@ pub fn get_clipboard_text() -> Result<String, String> {
         }
     }
 
-    Err("Impossible de récupérer le texte sélectionné".to_string())
+    Err("Impossible de récupérer le texte sélectionné. Vérifiez que \
+         l'application a les permissions d'accessibilité et que du texte \
+         est sélectionné."
+        .to_string())
 }
 
 #[cfg(target_os = "macos")]

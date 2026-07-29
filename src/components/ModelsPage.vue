@@ -29,6 +29,13 @@ withDefaults(defineProps<Props>(), {
 defineEmits<Emits>()
 
 const activeTab = ref<TabType>('tts')
+const searchQuery = ref('')
+
+function matchesSearch(...fields: (string | undefined)[]): boolean {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return true
+  return fields.some(f => f?.toLowerCase().includes(q))
+}
 
 function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
   return installedModels.some(m => m.name === modelId)
@@ -63,13 +70,23 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
       </button>
     </div>
 
+    <!-- Search bar -->
+    <div class="relative">
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="🔍 Rechercher par nom ou langue..."
+        class="w-full px-4 py-2.5 text-sm bg-mid-gray/5 border border-mid-gray/20 rounded-lg focus:outline-none focus:border-logo-primary/50 focus:bg-mid-gray/10 transition placeholder:text-mid-gray/50"
+      />
+    </div>
+
     <!-- TTS Models Tab -->
     <div v-if="activeTab === 'tts'" class="space-y-6">
       <!-- Sélection du moteur TTS -->
       <div class="p-4 border border-mid-gray/20 rounded-lg">
         <h3 class="font-semibold mb-4">Moteur TTS</h3>
         <div class="space-y-3">
-          <div v-for="model in availableTtsModels.filter(m => m.installed)" :key="model.id" class="flex items-center gap-3 p-3 border border-mid-gray/20 rounded cursor-pointer hover:bg-mid-gray/5 transition"
+          <div v-for="model in availableTtsModels.filter(m => m.installed && matchesSearch(m.label, m.engine))" :key="model.id" class="flex items-center gap-3 p-3 border border-mid-gray/20 rounded cursor-pointer hover:bg-mid-gray/5 transition"
             :class="{ 'border-logo-primary/50 bg-logo-primary/5': selectedTtsModel === model.id }"
             @click="$emit('tts-model-change', model.id)">
             <input
@@ -115,7 +132,7 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
 
         <!-- Installed models list -->
         <div v-else class="space-y-2">
-          <div v-for="model in piperModels" :key="model.name" class="flex items-center justify-between p-3 bg-green-500/5 border border-green-500/20 rounded">
+          <div v-for="model in piperModels.filter(m => matchesSearch(m.name))" :key="model.name" class="flex items-center justify-between p-3 bg-green-500/5 border border-green-500/20 rounded">
             <div class="flex-1">
               <p class="font-medium text-sm">{{ model.name }}</p>
               <p class="text-xs text-mid-gray">{{ model.size_mb.toFixed(2) }} MB</p>
@@ -136,7 +153,7 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
 
         <!-- Available models grid -->
         <div class="space-y-2">
-          <div v-for="model in availablePiperModels.filter(m => !isModelInstalled(m.id, piperModels))" :key="model.id" class="flex items-center justify-between p-3 bg-mid-gray/5 border border-mid-gray/10 rounded">
+          <div v-for="model in availablePiperModels.filter(m => !isModelInstalled(m.id, piperModels) && matchesSearch(m.name, m.language))" :key="model.id" class="flex items-center justify-between p-3 bg-mid-gray/5 border border-mid-gray/10 rounded">
             <div class="flex-1 min-w-0">
               <p class="font-medium text-sm">{{ model.name }}</p>
               <p class="text-xs text-mid-gray">{{ model.language }} • {{ model.quality }}</p>
@@ -190,7 +207,7 @@ function isModelInstalled(modelId: string, installedModels: PiperModel[]) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="model in models" :key="model.name" class="border-b border-mid-gray/10">
+            <tr v-for="model in models.filter(m => matchesSearch(m.name))" :key="model.name" class="border-b border-mid-gray/10">
               <td class="py-3 px-4">{{ model.name }}</td>
               <td class="py-3 px-4">{{ model.size_mb.toFixed(2) }} MB</td>
               <td class="py-3 px-4">
