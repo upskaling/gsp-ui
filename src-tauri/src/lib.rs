@@ -614,7 +614,7 @@ fn execute_speech_pipeline(
         let max_duration = std::time::Duration::from_secs(600);
 
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+            std::thread::sleep(std::time::Duration::from_millis(600));
 
             let current_id = CURRENT_THREAD_ID.lock().map(|g| *g).unwrap_or(0);
 
