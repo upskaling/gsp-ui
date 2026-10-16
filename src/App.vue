@@ -202,8 +202,8 @@ onUnmounted(() => {
               <span class="text-sm">🧪 Dev Mode</span>
               <span class="relative inline-flex items-center">
                 <span
-                  class="text-xs bg-text text-background px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap absolute bottom-full left-0 mb-2 text-center"
-                  style="font-size: 0.75rem; width: max-content;"
+                  class="text-xs bg-text text-background px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute bottom-full left-0 mb-2 text-left"
+                  style="font-size: 0.75rem; width: max-content; max-width: 22rem; white-space: normal; word-break: break-word;"
                 >
                   Lire et tester différentes conventions de nommage (snake_case, kebab-case, CamelCase)
                 </span>
