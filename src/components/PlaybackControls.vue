@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { LanguageOption } from '@/composables/useLanguage'
 import type { TtsModel } from '@/types'
+import SelectField from './SelectField.vue'
 
 interface Props {
   isSpeaking: boolean
@@ -23,8 +25,20 @@ interface Emits {
   (e: 'tts-model-change', modelId: string): void
 }
 
-withDefaults(defineProps<Props>(), {})
+const props = withDefaults(defineProps<Props>(), {})
 defineEmits<Emits>()
+
+const speedSelectOptions = computed(() =>
+  props.speedOptions.map((speed) => ({ value: String(speed), label: `${speed}x` })),
+)
+
+const languageSelectOptions = computed(() =>
+  props.sourceLanguageOptions.map((lang) => ({ value: lang.code, label: lang.label })),
+)
+
+const modelSelectOptions = computed(() =>
+  props.ttsModels.filter((model) => model.installed).map((model) => ({ value: model.id, label: model.label })),
+)
 </script>
 
 <template>
@@ -64,17 +78,14 @@ defineEmits<Emits>()
       <!-- Speed control -->
       <div class="flex items-center gap-2">
         <label for="speed-select" class="text-sm font-medium">Vitesse:</label>
-        <select
+        <SelectField
           id="speed-select"
-          :value="playbackSpeed"
-          @change="(e) => $emit('speed-change', parseFloat((e.target as HTMLSelectElement).value))"
+          :model-value="String(playbackSpeed)"
+          :options="speedSelectOptions"
           :disabled="isSpeaking"
-          class="px-3 py-1 rounded border border-mid-gray/20 bg-background text-text disabled:opacity-50"
-        >
-          <option v-for="speed in speedOptions" :key="speed" :value="speed">
-            {{ speed }}x
-          </option>
-        </select>
+          class="min-w-24"
+          @update:model-value="(value) => $emit('speed-change', parseFloat(value))"
+        />
       </div>
 
       <!-- Volume control -->
@@ -96,36 +107,28 @@ defineEmits<Emits>()
       <!-- Source language -->
       <div class="flex items-center gap-2">
         <label for="source-lang" class="text-sm font-medium">Source:</label>
-        <select
+        <SelectField
           id="source-lang"
-          :value="sourceLanguage"
-          @change="(e) => $emit('source-language-change', (e.target as HTMLSelectElement).value)"
+          :model-value="sourceLanguage"
+          :options="languageSelectOptions"
           :disabled="isSpeaking"
-          class="px-3 py-1 rounded border border-mid-gray/20 bg-background text-text disabled:opacity-50"
-        >
-          <option v-for="lang in sourceLanguageOptions" :key="lang.code" :value="lang.code">
-            {{ lang.label }}
-          </option>
-        </select>
+          class="min-w-32"
+          @update:model-value="(value) => $emit('source-language-change', value)"
+        />
       </div>
 
       <!-- TTS Model selection -->
       <div class="flex items-center gap-2">
         <label for="tts-model" class="text-sm font-medium">Parler:</label>
-        <select
+        <SelectField
           id="tts-model"
-          :value="selectedTtsModel"
-          @change="(e) => $emit('tts-model-change', (e.target as HTMLSelectElement).value)"
-          :disabled="isSpeaking || ttsModels.length === 0"
-          class="px-3 py-1 rounded border border-mid-gray/20 bg-background text-text disabled:opacity-50"
-        >
-          <option v-for="model in ttsModels.filter((m) => m.installed)" :key="model.id" :value="model.id">
-            {{ model.label }}
-          </option>
-          <option v-if="ttsModels.filter((m) => m.installed).length === 0" disabled>
-            Aucun modèle installé
-          </option>
-        </select>
+          :model-value="selectedTtsModel"
+          :options="modelSelectOptions"
+          :disabled="isSpeaking || modelSelectOptions.length === 0"
+          placeholder="Aucun modèle installé"
+          class="max-w-64"
+          @update:model-value="(value) => $emit('tts-model-change', value)"
+        />
       </div>
     </div>
 

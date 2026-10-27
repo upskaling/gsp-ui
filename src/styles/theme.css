@@ -6,18 +6,27 @@
   --light-color-background: #fbfbfb;
   --light-color-background-ui: #da5893;
   --light-color-mid-gray: #808080;
+  --light-color-border: rgba(128, 128, 128, 0.3);
+  --light-color-border-strong: rgba(128, 128, 128, 0.5);
+  --light-color-surface-hover: rgba(128, 128, 128, 0.08);
 
   /* Dark theme */
   --dark-color-text: #fbfbfb;
   --dark-color-background: #2c2b29;
   --dark-color-background-ui: #da5893;
   --dark-color-mid-gray: #a0a0a0;
+  --dark-color-border: rgba(160, 160, 160, 0.3);
+  --dark-color-border-strong: rgba(160, 160, 160, 0.5);
+  --dark-color-surface-hover: rgba(160, 160, 160, 0.08);
 
   /* Active palette — defaults to light, follows OS via media query */
   --color-text: var(--light-color-text);
   --color-background: var(--light-color-background);
   --color-background-ui: var(--light-color-background-ui);
   --color-mid-gray: var(--light-color-mid-gray);
+  --color-border: var(--light-color-border);
+  --color-border-strong: var(--light-color-border-strong);
+  --color-surface-hover: var(--light-color-surface-hover);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +35,9 @@
     --color-background: var(--dark-color-background);
     --color-background-ui: var(--dark-color-background-ui);
     --color-mid-gray: var(--dark-color-mid-gray);
+    --color-border: var(--dark-color-border);
+    --color-border-strong: var(--dark-color-border-strong);
+    --color-surface-hover: var(--dark-color-surface-hover);
   }
 }
 
@@ -35,6 +47,9 @@
   --color-background: var(--light-color-background);
   --color-background-ui: var(--light-color-background-ui);
   --color-mid-gray: var(--light-color-mid-gray);
+  --color-border: var(--light-color-border);
+  --color-border-strong: var(--light-color-border-strong);
+  --color-surface-hover: var(--light-color-surface-hover);
 }
 
 :root[data-theme="dark"] {
@@ -42,4 +57,7 @@
   --color-background: var(--dark-color-background);
   --color-background-ui: var(--dark-color-background-ui);
   --color-mid-gray: var(--dark-color-mid-gray);
+  --color-border: var(--dark-color-border);
+  --color-border-strong: var(--dark-color-border-strong);
+  --color-surface-hover: var(--dark-color-surface-hover);
 }
