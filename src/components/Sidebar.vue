@@ -39,7 +39,10 @@ const sections = computed(() => [
 <template>
   <div class="flex flex-col w-48 h-screen border-r border-mid-gray/20 items-center px-2 py-4 bg-background">
     <!-- Logo -->
-    <div class="mb-6 text-2xl font-bold">🎧 gsp-ui</div>
+    <div class="mb-6 flex items-center gap-2">
+      <img src="/logo.svg" alt="" class="w-8 h-8 rounded-lg shrink-0" />
+      <span class="text-xl font-bold tracking-tight">gsp-ui</span>
+    </div>
 
     <!-- Navigation sections -->
     <div class="flex flex-col w-full gap-1">
