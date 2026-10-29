@@ -424,6 +424,33 @@ impl EspeakNgTts {
     fn get_voice(&self) -> &str {
         &self.lang
     }
+
+    /// Construit les arguments de la commande `espeak-ng`.
+    ///
+    /// Notes sur `-b 1` et `--stdin` (correctif anti "mots fantômes") :
+    /// sans ces options, `espeak-ng` lit stdin ligne par ligne via
+    /// `fgets(buf, 1000)`. Comme le texte prétraité ne contient plus de
+    /// retours à la ligne, tout texte de plus de 999 octets est découpé en
+    /// morceaux. Si la coupure tombe au milieu d'un caractère UTF-8
+    /// multi-octets (é, î, ’, —, …), la détection automatique d'encodage
+    /// bascule en latin1 pour le morceau et chaque octet isolé est épelé :
+    /// `A9` -> "copyright", `AE` -> "marque déposée",
+    /// `â`/`î` isolé -> "accent circonflexe", etc.
+    /// `-b 1` force l'UTF-8 et `--stdin` lit le flux d'un seul bloc,
+    /// ce qui supprime cette classe de bug.
+    fn build_args(&self, speed_wpm: i32) -> Vec<String> {
+        vec![
+            "-v".to_string(),
+            self.get_voice().to_string(),
+            "-s".to_string(),
+            speed_wpm.to_string(),
+            "-b".to_string(),
+            "1".to_string(),
+            "--stdin".to_string(),
+            "-w".to_string(),
+            self.output_file.clone(),
+        ]
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -437,14 +464,10 @@ impl TtsEngine for EspeakNgTts {
         );
 
         let speed_arg = (self.speed * 150.0) as i32;
+        let args = self.build_args(speed_arg);
 
         let mut child = Command::new("espeak-ng")
-            .arg("-v")
-            .arg(self.get_voice())
-            .arg("-s")
-            .arg(speed_arg.to_string())
-            .arg("-w")
-            .arg(&self.output_file)
+            .args(&args)
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| format!("Erreur spawn espeak-ng: {}", e))?;
@@ -454,6 +477,13 @@ impl TtsEngine for EspeakNgTts {
             stdin
                 .write_all(text.as_bytes())
                 .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
+            // Garantir un retour à la ligne final pour que le dernier
+            // segment soit bien terminé côté espeak-ng.
+            if !text.ends_with('\n') {
+                stdin
+                    .write_all(b"\n")
+                    .map_err(|e| format!("Erreur écriture stdin: {}", e))?;
+            }
         }
 
         let result = child
@@ -810,4 +840,61 @@ pub fn get_available_tts_models() -> Result<Vec<TtsModel>, String> {
     }
 
     Ok(models)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use super::EspeakNgTts;
+
+    // Vérifie que l'invocation espeak-ng force l'UTF-8 (-b 1) et la lecture
+    // en un seul bloc (--stdin).
+    //
+    // Contexte : sans ces options, espeak-ng lit stdin ligne par ligne avec
+    // fgets(buf, 1000). Le texte prétraité ne contenant plus de retours à la
+    // ligne, tout texte > 999 octets est découpé, et une coupure au milieu
+    // d'un caractère multi-octets (é, î, ’, —, …) fait basculer la détection
+    // d'encodage en latin1 : les octets isolés sont alors épelés
+    // ("copyright" pour A9, "marque déposée" pour AE,
+    // "accent circonflexe" pour â, ...).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_espeak_args_force_utf8_and_bulk_stdin() {
+        let tts = EspeakNgTts::with_voice("fr".to_string());
+        let args = tts.build_args(150);
+
+        let pos_b = args.iter().position(|a| a == "-b");
+        assert!(pos_b.is_some(), "l'option -b doit être présente");
+        assert_eq!(args[pos_b.unwrap() + 1], "1", "-b doit forcer l'UTF-8");
+
+        assert!(
+            args.iter().any(|a| a == "--stdin"),
+            "l'option --stdin doit être présente (lecture en un seul bloc)"
+        );
+
+        // Ordre canonique des arguments
+        assert_eq!(
+            args,
+            vec![
+                "-v",
+                "fr",
+                "-s",
+                "150",
+                "-b",
+                "1",
+                "--stdin",
+                "-w",
+                "/dev/shm/out.wav",
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_espeak_args_voice_and_speed() {
+        let tts = EspeakNgTts::with_voice("mb-FR1".to_string());
+        let args = tts.build_args(225);
+        assert_eq!(args[1], "mb-FR1");
+        assert_eq!(args[3], "225");
+    }
 }
