@@ -849,8 +849,35 @@ fn speak_clipboard(
     execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_CLIPBOARD")
 }
 
+/// Vérifie qu'un serveur d'affichage est disponible avant d'initialiser GTK.
+///
+/// Sans X11 ni Wayland, `tao` panique avec « Failed to initialize GTK ».
+#[cfg(target_os = "linux")]
+fn ensure_graphical_session() {
+    fn is_set(name: &str) -> bool {
+        std::env::var_os(name)
+            .map(|value| !value.is_empty())
+            .unwrap_or(false)
+    }
+
+    if is_set("DISPLAY") || is_set("WAYLAND_DISPLAY") {
+        return;
+    }
+
+    eprintln!(
+        "[gsp-ui] Erreur : une interface graphique (X11 ou Wayland) est nécessaire pour lancer l'application."
+    );
+
+    std::process::exit(1);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_graphical_session() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    ensure_graphical_session();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
