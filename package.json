@@ -10,14 +10,14 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.1",
-    "@tauri-apps/plugin-opener": "^2.7.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "vue": "^3.5.43"
   },
   "devDependencies": {
     "@lucide/vue": "^1.50.0",
     "@tailwindcss/postcss": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.1",
+    "@tauri-apps/cli": "^2.12.3",
     "@vitejs/plugin-vue": "^6.0.9",
     "autoprefixer": "^10.6.1",
     "postcss": "^8.5.28",
