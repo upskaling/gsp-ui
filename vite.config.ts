@@ -3,6 +3,14 @@ import vue from "@vitejs/plugin-vue";
 import path from "node:path";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
+
+// import.meta.dirname is available at runtime (Node 20.11+) and required for
+// Vite's native config loader; declared here since @types/node isn't installed.
+declare global {
+  interface ImportMeta {
+    readonly dirname: string;
+  }
+}
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
@@ -10,7 +18,7 @@ export default defineConfig(() => ({
   plugins: [vue()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 

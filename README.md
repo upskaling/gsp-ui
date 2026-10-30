@@ -41,6 +41,15 @@ sudo pacman -S pulseaudio
 
 ### Développement
 
+```bash
+# Installer les dépendances de développement
+sudo apt install -y \
+  libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev \
+  libxdo-dev libssl-dev libasound2-dev \
+  build-essential pkg-config cmake clang ninja-build
+```
+
 #### Configuration
 
 ```bash
