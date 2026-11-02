@@ -17,6 +17,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub dev_mode: bool,
     #[serde(default)]
+    pub start_hidden: bool,
+    #[serde(default)]
     pub source_language: String,
     #[serde(default)]
     pub target_language: String,
@@ -70,6 +72,7 @@ impl Default for AppConfig {
             playback_speed: 1.0,
             volume: 1.0,
             dev_mode: false,
+            start_hidden: false,
             source_language: "auto".to_string(),
             target_language: "fr".to_string(),
             tts_model_selection: "piper:fr_FR-tom-medium".to_string(),
@@ -159,6 +162,7 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.playback_speed, 1.0);
         assert!(!config.dev_mode);
+        assert!(!config.start_hidden);
         assert_eq!(config.source_language, "auto");
         assert_eq!(config.target_language, "fr");
     }

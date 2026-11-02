@@ -20,6 +20,7 @@ import { useKeyRecording } from './composables/useKeyRecording'
 const appVersion = '0.1.0'
 const activeSection = ref<SidebarSection>('playback')
 const devMode = ref(false)
+const startHidden = ref(false)
 
 let shortcutInProgress = false
 let unlisten: (() => void)[] = []
@@ -52,6 +53,27 @@ async function toggleDevMode() {
   }
 }
 
+async function loadStartHidden() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    startHidden.value = await invoke('load_start_hidden')
+    console.log('[loadStartHidden] Démarrage masqué chargé:', startHidden.value)
+  } catch (error) {
+    console.error('Erreur lors du chargement du démarrage masqué:', error)
+  }
+}
+
+async function toggleStartHidden() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    console.log('[toggleStartHidden] Sauvegarde du démarrage masqué:', startHidden.value)
+    await invoke('save_start_hidden', { enabled: startHidden.value })
+    console.log('[toggleStartHidden] Démarrage masqué sauvegardé:', startHidden.value)
+  } catch (error) {
+    console.error('Erreur lors de la sauvegarde du démarrage masqué:', error)
+  }
+}
+
 onMounted(async () => {
   // Load all configurations
   await playback.loadPlaybackSpeed()
@@ -62,6 +84,7 @@ onMounted(async () => {
   await ttsModels.loadAvailableTtsModels()
   await ttsModels.loadSelectedTtsModel()
   await loadDevMode()
+  await loadStartHidden()
   await models.loadModels()
 
   // Setup keyboard event listeners
@@ -194,6 +217,23 @@ onUnmounted(() => {
             @source-language-change="language.setSourceLanguage"
             @tts-model-change="ttsModels.setTtsModel"
           />
+
+          <!-- Start Hidden Toggle -->
+          <div class="mt-6 p-4 bg-mid-gray/10 rounded">
+            <label class="flex items-center gap-2 cursor-pointer group">
+              <input type="checkbox" v-model="startHidden" @change="toggleStartHidden" class="w-4 h-4" />
+              <span class="text-sm">🚀 Démarrer masqué</span>
+              <span class="relative inline-flex items-center">
+                <span
+                  class="text-xs bg-text text-background px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute bottom-full left-0 mb-2 text-left"
+                  style="font-size: 0.75rem; width: max-content; max-width: 22rem; white-space: normal; word-break: break-word;"
+                >
+                  Au lancement, l'application démarre dans la barre système sans afficher la fenêtre. Cliquez sur
+                  l'icône de la barre système pour l'ouvrir.
+                </span>
+              </span>
+            </label>
+          </div>
 
           <!-- Dev Mode Toggle (debug only) -->
           <div class="mt-6 p-4 bg-mid-gray/10 rounded">

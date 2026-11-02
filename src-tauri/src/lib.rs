@@ -54,13 +54,16 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     Ok(Image::new(static_data, width, height))
 }
 
-#[cfg(target_os = "macos")]
 fn show_main_window(app: &AppHandle) {
     if let Some(main_window) = app.get_webview_window("main") {
         let _ = main_window.unminimize();
         let _ = main_window.show();
         let _ = main_window.set_focus();
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        }
     }
 }
 
@@ -320,6 +323,16 @@ fn load_dev_mode() -> Result<bool, String> {
 #[tauri::command]
 fn save_dev_mode(enabled: bool) -> Result<(), String> {
     update_config(|cfg| cfg.dev_mode = enabled)
+}
+
+#[tauri::command]
+fn load_start_hidden() -> Result<bool, String> {
+    load_config().map(|cfg| cfg.start_hidden)
+}
+
+#[tauri::command]
+fn save_start_hidden(enabled: bool) -> Result<(), String> {
+    update_config(|cfg| cfg.start_hidden = enabled)
 }
 
 #[tauri::command]
@@ -874,6 +887,19 @@ pub fn run() {
                 error!("Erreur lors de la configuration du raccourci global: {}", e);
             }
 
+            // Afficher la fenêtre principale sauf si l'option "démarrer masqué"
+            // est activée. La fenêtre est créée invisible (tauri.conf.json) pour
+            // éviter un flash au démarrage.
+            let start_hidden = load_config().map(|cfg| cfg.start_hidden).unwrap_or(false);
+            let tray_available = app.tray_by_id("main-tray").is_some();
+
+            if start_hidden && tray_available {
+                info!("[SETUP] Démarrage masqué: la fenêtre principale reste cachée");
+            } else {
+                info!("[SETUP] Affichage de la fenêtre principale");
+                show_main_window(app.handle());
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -901,6 +927,8 @@ pub fn run() {
             set_playing_volume,
             load_dev_mode,
             save_dev_mode,
+            load_start_hidden,
+            save_start_hidden,
             load_source_language,
             save_source_language,
             load_target_language,
