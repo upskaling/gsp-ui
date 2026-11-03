@@ -1,6 +1,6 @@
 mod clipboard;
 mod config;
-mod ipa;
+pub mod ipa;
 mod language_detector;
 mod model_downloader;
 mod ocr;
