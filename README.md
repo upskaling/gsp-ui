@@ -2,7 +2,9 @@
 
 **Un lecteur d'écran accessible pour les personnes dyslexiques**
 
-gsp-ui est une application de bureau open source qui convertit le texte en parole via une touche de raccourci global. Appuyez sur la touche, le texte du presse-papiers est lu à haute voix par eSpeak-NG directement sur votre ordinateur.
+gsp-ui est une application de bureau open source qui convertit le texte en parole via une touche de raccourci global. Appuyez sur la touche, le texte du presse-papiers est lu à haute voix par Piper TTS directement sur votre ordinateur.
+
+Les mots et phrases écrits en **alphabet phonétique international** (API), par exemple `/bɔ̃ʒuʁ/` ou `[həˈloʊ]`, sont automatiquement reconnus et prononcés correctement. Cette fonction peut être désactivée depuis l'écran de lecture.
 
 ## 📸 Aperçu
 
@@ -12,21 +14,22 @@ gsp-ui est une application de bureau open source qui convertit le texte en parol
 
 ### Système
 - **Linux (X11)** — l'application est actuellement compatible avec X11
-- **eSpeak-NG** — synthèse vocale
 - **PulseAudio** — système audio
 
 ### Installation des dépendances système
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install espeak-ng pulseaudio
+sudo apt-get install pulseaudio
 
 # Fedora/RHEL
-sudo dnf install espeak-ng pulseaudio
+sudo dnf install pulseaudio
 
 # Arch
-sudo pacman -S espeak-ng pulseaudio
+sudo pacman -S pulseaudio
 ```
+
+**Note :** Le binaire Piper TTS et les modèles vocaux sont téléchargés automatiquement au premier lancement de l'application. Aucune installation manuelle n'est requise.
 
 ## 🚀 Installation et utilisation
 
@@ -39,6 +42,15 @@ sudo pacman -S espeak-ng pulseaudio
 5. Copiez du texte et appuyez sur votre touche pour le faire lire
 
 ### Développement
+
+```bash
+# Installer les dépendances de développement
+sudo apt install -y \
+  libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev \
+  libxdo-dev libssl-dev libasound2-dev \
+  build-essential pkg-config cmake clang ninja-build
+```
 
 #### Configuration
 

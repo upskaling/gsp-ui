@@ -5,6 +5,7 @@
 use log::warn;
 use std::collections::HashMap;
 use std::path::Path;
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 /// Parse les hashtags en séparant les mots CamelCase
 ///
@@ -94,6 +95,62 @@ pub fn remove_special_characters(string: &str) -> String {
         .chars()
         .map(|c| mapping.get(&c).copied().unwrap_or(c))
         .collect()
+}
+
+/// Normalise le texte (NFC) et supprime les caractères invisibles
+///
+/// Élimine les sélecteurs de variation, les caractères de format
+/// (zero-width, contrôles bidi, ...), les espaces insécables et les
+/// diacritiques combinants qui subsistent après la normalisation NFC.
+///
+/// # Exemples
+/// ```
+/// # use gsp_ui_lib::textutils::sanitize_unicode;
+/// let text = "C\u{FE01}h\u{FE01}urc\u{FE01}h";
+/// let result = sanitize_unicode(text);
+/// assert_eq!(result, "Church");
+/// ```
+pub fn sanitize_unicode(text: &str) -> String {
+    let normalized: String = text.nfc().collect();
+    let mut result = String::with_capacity(normalized.len());
+
+    for c in normalized.chars() {
+        match c {
+            // Espaces insécables et séparateurs -> espace simple
+            '\u{00A0}' | '\u{2007}' | '\u{202F}' | '\u{2028}' | '\u{2029}' => {
+                result.push(' ');
+            }
+            _ if is_invisible(c) || is_combining_mark(c) => {}
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
+
+/// Indique si un caractère est invisible (format, sélecteur de variation, ...)
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{0000}'..='\u{0008}'      // caractères de contrôle (hors \t et \n)
+        | '\u{000B}'..='\u{001F}'    // caractères de contrôle
+        | '\u{007F}'                  // DEL
+        | '\u{00AD}'                  // soft hyphen
+        | '\u{034F}'                  // combining grapheme joiner
+        | '\u{061C}'                  // marque directionnelle arabe
+        | '\u{115F}'..='\u{1160}'     // remplisseurs hangul
+        | '\u{17B4}'..='\u{17B5}'     // voyelles inhérentes khmères
+        | '\u{180E}'                  // séparateur de voyelle mongol
+        | '\u{200B}'..='\u{200F}'     // zero-width, ZWNJ, ZWJ, LRM, RLM
+        | '\u{202A}'..='\u{202E}'     // contrôles bidirectionnels
+        | '\u{2060}'..='\u{2064}'     // word joiner, opérateurs invisibles
+        | '\u{2066}'..='\u{2069}'     // isolats bidirectionnels
+        | '\u{206A}'..='\u{206F}'     // formatage déprécié
+        | '\u{FE00}'..='\u{FE0F}'     // sélecteurs de variation
+        | '\u{FEFF}'                   // BOM / zero-width no-break space
+        | '\u{FFF9}'..='\u{FFFB}'     // annotations interlinéaires
+        | '\u{E0000}'..='\u{E007F}'   // tag characters (drapeaux)
+        | '\u{E0100}'..='\u{E01EF}'   // sélecteurs de variation supplémentaires
+    )
 }
 
 /// supprimer les caractères markdown
@@ -286,9 +343,10 @@ fn create_character_mapping() -> HashMap<char, char> {
 /// Prétraite le texte (nettoyage complet avant traitement)
 ///
 /// Applique les transformations dans cet ordre:
-/// 1. Parse les hashtags CamelCase
-/// 2. Normalise les espaces
-/// 3. Supprime les caractères spéciaux
+/// 1. Normalise Unicode et supprime les caractères invisibles
+/// 2. Parse les hashtags CamelCase
+/// 3. Normalise les espaces
+/// 4. Supprime les caractères spéciaux
 ///
 /// # Exemples
 /// ```
@@ -298,7 +356,7 @@ fn create_character_mapping() -> HashMap<char, char> {
 /// assert_eq!(result, "#hello World est gras");
 /// ```
 pub fn preprocess_text(text: &str) -> String {
-    let mut text = text.to_string();
+    let mut text = sanitize_unicode(text);
     text = parse_hashtag(&text);
     text = trim_whitespace(&text);
     text = remove_special_characters(&text);
@@ -450,6 +508,51 @@ mod tests {
     fn test_replace_special_chars() {
         let result = remove_special_characters("С і І ѕ");
         assert_eq!(result, "C i I s");
+    }
+
+    #[test]
+    fn test_sanitize_unicode_variation_selectors() {
+        let dirty = "Phileas Fogg comp︁tait quatre-vingts jours pour accompli︌r son tour du monde et quel︊ques he︆ures de sommeil. I︍l concédait qu'un voya︊geur pati︌ent y serait par︇venu dès 1872. Passepa︀rtout, qui ten︊ait le regis︋tre des bag︈ages, range︈ait désorm︄ais l'explo︇it parmi les gran︁des aventures.";
+        let expected = "Phileas Fogg comptait quatre-vingts jours pour accomplir son tour du monde et quelques heures de sommeil. Il concédait qu'un voyageur patient y serait parvenu dès 1872. Passepartout, qui tenait le registre des bagages, rangeait désormais l'exploit parmi les grandes aventures.";
+
+        let result = sanitize_unicode(dirty);
+
+        assert_eq!(result, expected);
+        assert!(
+            !result
+                .chars()
+                .any(|c| ('\u{FE00}'..='\u{FE0F}').contains(&c)),
+            "sélecteurs de variation résiduels"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_unicode_normalization_nfc() {
+        assert_eq!(sanitize_unicode("e\u{0301}xecute"), "éxecute");
+        assert_eq!(sanitize_unicode("éxecute"), "éxecute");
+        assert_eq!(sanitize_unicode("cafe\u{0301}"), "café");
+    }
+
+    #[test]
+    fn test_sanitize_unicode_zero_width_and_bidi() {
+        assert_eq!(sanitize_unicode("bon\u{200B}jour"), "bonjour");
+        assert_eq!(sanitize_unicode("bo\u{200D}njour"), "bonjour");
+        assert_eq!(sanitize_unicode("\u{202E}rtl"), "rtl");
+        assert_eq!(sanitize_unicode("\u{FEFF}texte"), "texte");
+        assert_eq!(sanitize_unicode("mot\u{00AD}hyphen"), "mothyphen");
+        assert_eq!(sanitize_unicode("a\u{00A0}b\u{202F}c"), "a b c");
+    }
+
+    #[test]
+    fn test_preprocess_text_with_invisible_characters() {
+        let dirty =
+            "Phileas Fogg comp︁tait quatre-vingts jours pour accompli︌r son tour du monde et quel︊ques he︆ures de sommeil.";
+        let result = preprocess_text(dirty);
+
+        assert_eq!(
+            result,
+            "Phileas Fogg comptait quatre-vingts jours pour accomplir son tour du monde et quelques heures de sommeil."
+        );
     }
 
     #[test]

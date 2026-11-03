@@ -23,4 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 .pnpm-store

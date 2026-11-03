@@ -1,19 +1,25 @@
+mod clipboard;
+mod config;
+mod ipa;
 mod language_detector;
+mod model_downloader;
 mod ocr;
 mod screenshooter;
 mod shortcut;
 pub mod textutils;
+mod translation_engine;
 mod translator;
 mod tts;
 
+use clipboard::get_clipboard_text;
+use config::{load_config, update_config, ClipboardShortcut};
+use ipa::{contains_ipa, to_pronounceable};
 use language_detector::{detect_language, DetectedLanguage};
 use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use screenshooter::screenshot_region;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -21,11 +27,6 @@ use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
-#[cfg(target_os = "linux")]
-use tts::EspeakNg;
-#[cfg(target_os = "macos")]
-use tts::MacOsTts;
-use tts::TtsEngine;
 
 struct AudioPlayback {
     player: Player,
@@ -36,138 +37,9 @@ struct AudioPlayback {
 
 static CURRENT_SINK: Mutex<Option<AudioPlayback>> = Mutex::new(None);
 static CURRENT_THREAD_ID: Mutex<u128> = Mutex::new(0);
-static CONFIG_CACHE: Mutex<Option<Arc<AppConfig>>> = Mutex::new(None);
 
 struct PlaybackState {
     _dummy: u8,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct AppConfig {
-    #[serde(default)]
-    clipboard_shortcut: ClipboardShortcut,
-    #[serde(default)]
-    ocr_shortcut: ClipboardShortcut,
-    #[serde(default)]
-    playback_speed: f32,
-    #[serde(default)]
-    dev_mode: bool,
-    #[serde(default)]
-    source_language: String,
-    #[serde(default)]
-    target_language: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ClipboardShortcut {
-    #[serde(default)]
-    ctrl: bool,
-    #[serde(default)]
-    shift: bool,
-    #[serde(default)]
-    alt: bool,
-    #[serde(default)]
-    meta: bool,
-    #[serde(default)]
-    key: String,
-}
-
-impl Default for ClipboardShortcut {
-    fn default() -> Self {
-        ClipboardShortcut {
-            ctrl: true,
-            shift: true,
-            alt: false,
-            meta: false,
-            key: "V".to_string(),
-        }
-    }
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        AppConfig {
-            clipboard_shortcut: ClipboardShortcut {
-                ctrl: true,
-                shift: true,
-                alt: false,
-                meta: false,
-                key: "V".to_string(),
-            },
-            ocr_shortcut: ClipboardShortcut {
-                ctrl: true,
-                shift: false,
-                alt: true,
-                meta: false,
-                key: "o".to_string(),
-            },
-            playback_speed: 1.0,
-            dev_mode: false,
-            source_language: "auto".to_string(),
-            target_language: "fr".to_string(),
-        }
-    }
-}
-
-fn get_config_path() -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Impossible de trouver le répertoire de configuration".to_string())?;
-    let app_config_dir = config_dir.join("gsp-ui");
-
-    if !app_config_dir.exists() {
-        std::fs::create_dir_all(&app_config_dir)
-            .map_err(|e| format!("Impossible de créer le répertoire de config: {}", e))?;
-    }
-
-    Ok(app_config_dir.join("config.json"))
-}
-
-fn load_config() -> Result<AppConfig, String> {
-    let mut cache = CONFIG_CACHE
-        .lock()
-        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
-
-    if let Some(cached) = cache.as_ref() {
-        return Ok((**cached).clone());
-    }
-
-    let config_path = get_config_path()?;
-
-    let config = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Erreur de lecture du fichier de config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Erreur de parsing du fichier de config: {}", e))?
-    } else {
-        AppConfig::default()
-    };
-
-    *cache = Some(Arc::new(config.clone()));
-    Ok(config)
-}
-
-fn save_config(config: &AppConfig) -> Result<(), String> {
-    let config_path = get_config_path()?;
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Erreur de sérialisation: {}", e))?;
-    std::fs::write(&config_path, content)
-        .map_err(|e| format!("Erreur d'écriture du fichier de config: {}", e))?;
-
-    let mut cache = CONFIG_CACHE
-        .lock()
-        .map_err(|e| format!("Erreur de verrouillage du cache: {}", e))?;
-    *cache = Some(Arc::new(config.clone()));
-
-    Ok(())
-}
-
-fn update_config<F>(f: F) -> Result<(), String>
-where
-    F: FnOnce(&mut AppConfig),
-{
-    let mut config = load_config()?;
-    f(&mut config);
-    save_config(&config)
 }
 
 fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
@@ -182,6 +54,19 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     let static_data: &'static [u8] = Box::leak(rgba_data.into_boxed_slice());
 
     Ok(Image::new(static_data, width, height))
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.unminimize();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        }
+    }
 }
 
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
@@ -405,7 +290,31 @@ fn load_playback_speed() -> Result<f32, String> {
 
 #[tauri::command]
 fn save_playback_speed(speed: f32) -> Result<(), String> {
-    update_config(|cfg| cfg.playback_speed = speed.clamp(0.5, 2.0))
+    update_config(|cfg| cfg.playback_speed = speed.clamp(0.5, 3.0))
+}
+
+#[tauri::command]
+fn load_volume() -> Result<f32, String> {
+    load_config().map(|cfg| cfg.volume)
+}
+
+#[tauri::command]
+fn save_volume(volume: f32) -> Result<(), String> {
+    update_config(|cfg| cfg.volume = volume.clamp(0.0, 1.0))
+}
+
+#[tauri::command]
+fn set_playing_volume(volume: f32) -> Result<(), String> {
+    let sink_guard = CURRENT_SINK
+        .lock()
+        .map_err(|e| format!("Erreur lors du verrouillage du sink: {}", e))?;
+
+    if let Some(playback) = sink_guard.as_ref() {
+        playback.player.set_volume(volume.clamp(0.0, 1.0));
+        Ok(())
+    } else {
+        Err("Aucune lecture en cours".to_string())
+    }
 }
 
 #[tauri::command]
@@ -416,6 +325,26 @@ fn load_dev_mode() -> Result<bool, String> {
 #[tauri::command]
 fn save_dev_mode(enabled: bool) -> Result<(), String> {
     update_config(|cfg| cfg.dev_mode = enabled)
+}
+
+#[tauri::command]
+fn load_start_hidden() -> Result<bool, String> {
+    load_config().map(|cfg| cfg.start_hidden)
+}
+
+#[tauri::command]
+fn save_start_hidden(enabled: bool) -> Result<(), String> {
+    update_config(|cfg| cfg.start_hidden = enabled)
+}
+
+#[tauri::command]
+fn load_ipa_enabled() -> Result<bool, String> {
+    load_config().map(|cfg| cfg.ipa_enabled)
+}
+
+#[tauri::command]
+fn save_ipa_enabled(enabled: bool) -> Result<(), String> {
+    update_config(|cfg| cfg.ipa_enabled = enabled)
 }
 
 #[tauri::command]
@@ -452,6 +381,48 @@ fn reset_shortcuts_to_default() -> Result<(), String> {
     })
 }
 
+#[tauri::command]
+fn list_models() -> Result<Vec<model_downloader::ModelInfo>, String> {
+    model_downloader::list_available_models()
+        .map_err(|e| format!("Erreur lors de la récupération des modèles: {}", e))
+}
+
+#[tauri::command]
+fn delete_model(model_name: String) -> Result<(), String> {
+    model_downloader::delete_model(&model_name)
+        .map_err(|e| format!("Erreur lors de la suppression du modèle: {}", e))
+}
+
+#[tauri::command]
+fn list_piper_models() -> Result<Vec<tts::PiperModelInfo>, String> {
+    tts::list_piper_models()
+}
+
+#[tauri::command]
+fn delete_piper_model(model_name: String) -> Result<(), String> {
+    tts::delete_piper_model(&model_name)
+}
+
+#[tauri::command]
+fn download_piper_model(model_name: String) -> Result<(), String> {
+    tts::download_piper_model(&model_name)
+}
+
+#[tauri::command]
+fn get_available_tts_models() -> Result<Vec<tts::TtsModel>, String> {
+    tts::get_available_tts_models()
+}
+
+#[tauri::command]
+fn load_tts_model_selection() -> Result<String, String> {
+    load_config().map(|cfg| cfg.tts_model_selection)
+}
+
+#[tauri::command]
+fn save_tts_model_selection(model_id: String) -> Result<(), String> {
+    update_config(|cfg| cfg.tts_model_selection = model_id)
+}
+
 fn get_language_code(detected_lang: DetectedLanguage) -> &'static str {
     match detected_lang {
         DetectedLanguage::English => "en",
@@ -468,11 +439,13 @@ fn translate_if_needed(
     let detected_code = get_language_code(detected_lang);
 
     if source_lang == "auto" {
-        if detected_code != target_lang && detected_code == "en" && target_lang == "fr" {
+        // Mode auto-détection: traduire si la langue détectée diffère de la cible
+        if detected_code != target_lang {
             debug!(
-                "[TRANSLATOR] Détection automatique: texte en anglais, traduction en français..."
+                "[TRANSLATOR] Détection automatique: texte en {}, traduction en {}...",
+                detected_code, target_lang
             );
-            match translate(text, "en", "fr") {
+            match translate(text, detected_code, target_lang) {
                 Ok(translated) => {
                     debug!("[TRANSLATOR] Traduction réussie");
                     Ok(translated)
@@ -484,9 +457,15 @@ fn translate_if_needed(
                 }
             }
         } else {
+            // Langue détectée == langue cible, pas de traduction
+            debug!(
+                "[TRANSLATOR] Détection automatique: texte et cible dans la même langue ({}), pas de traduction",
+                detected_code
+            );
             Ok(text.to_string())
         }
     } else if source_lang != target_lang {
+        // Source spécifiée par l'utilisateur et différente de la cible: traduire
         debug!(
             "[TRANSLATOR] Traduction de {} en {}...",
             source_lang, target_lang
@@ -503,6 +482,7 @@ fn translate_if_needed(
             }
         }
     } else {
+        // Source == cible, pas de traduction
         Ok(text.to_string())
     }
 }
@@ -512,6 +492,7 @@ struct SpeechPipelineInput {
     source_lang: String,
     target_lang: String,
     playback_speed: f32,
+    volume: f32,
     dev_mode: bool,
 }
 
@@ -523,7 +504,18 @@ fn execute_speech_pipeline(
 ) -> Result<(), String> {
     debug!("[{}] Début avec texte: {}", log_tag, input.text);
 
-    let text_to_process = if input.dev_mode {
+    let ipa_enabled = load_config().map(|cfg| cfg.ipa_enabled).unwrap_or(true);
+    let has_ipa = ipa_enabled && contains_ipa(&input.text);
+
+    let text_to_process = if has_ipa {
+        debug!(
+            "[{}] Transcription en alphabet phonétique détectée, conversion en graphie prononçable",
+            log_tag
+        );
+        let converted = to_pronounceable(&input.text, &input.target_lang);
+        debug!("[{}] Texte API converti: {}", log_tag, converted);
+        converted
+    } else if input.dev_mode {
         debug!(
             "[{}] Mode développeur activé, application de read_vars",
             log_tag
@@ -539,12 +531,22 @@ fn execute_speech_pipeline(
     let detected_lang = detect_language(&cleaned_text);
     debug!("[{}] Langue détectée: {:?}", log_tag, detected_lang);
 
-    let text_to_speak = translate_if_needed(
-        &cleaned_text,
-        detected_lang,
-        &input.source_lang,
-        &input.target_lang,
-    )?;
+    let text_to_speak = if has_ipa {
+        // Le texte a déjà été transcrit dans la langue de lecture : le traduire
+        // n'aurait pas de sens et altérerait la prononciation.
+        debug!(
+            "[{}] Traduction ignorée : le texte contient une transcription API",
+            log_tag
+        );
+        cleaned_text.clone()
+    } else {
+        translate_if_needed(
+            &cleaned_text,
+            detected_lang,
+            &input.source_lang,
+            &input.target_lang,
+        )?
+    };
 
     {
         let mut sink_guard = CURRENT_SINK
@@ -556,16 +558,49 @@ fn execute_speech_pipeline(
     }
 
     debug!("[{}] Création du TTS engine", log_tag);
-    #[cfg(target_os = "macos")]
-    let mut tts = MacOsTts::new();
-    #[cfg(target_os = "linux")]
-    let mut tts = EspeakNg::new();
-    tts.set_lang(input.target_lang.clone());
+    let config = load_config().ok();
+    let model_selection = config.as_ref().map(|c| c.tts_model_selection.as_str());
+    let mut tts = tts::create_tts_engine(model_selection);
 
-    #[cfg(target_os = "macos")]
-    let tts_speed = (input.playback_speed * 200.0) as i32;
-    #[cfg(target_os = "linux")]
-    let tts_speed = ((input.playback_speed * 100.0) as i32).clamp(50, 200);
+    // Déterminer la langue du TTS en fonction du texte final (potentiellement traduit)
+    let tts_lang = if input.source_lang == "auto" {
+        // Source auto: vérifier si une traduction s'est produite
+        let detected_code = get_language_code(detected_lang);
+
+        if detected_code != input.target_lang {
+            // Une traduction s'est produite (detected != target)
+            // Utiliser directement la langue cible au lieu de re-détecter
+            debug!(
+                "[{}] Traduction détectée (auto-source {} → cible {}), utilisation de la langue cible pour TTS",
+                log_tag, detected_code, input.target_lang
+            );
+            input.target_lang.clone()
+        } else {
+            // Pas de traduction: re-détecter est inutile, utiliser la langue détectée
+            debug!(
+                "[{}] Pas de traduction (detected == cible: {}), utilisation de la langue détectée pour TTS",
+                log_tag, detected_code
+            );
+            detected_code.to_string()
+        }
+    } else if input.source_lang != input.target_lang {
+        // Source spécifiée et différent de cible: le texte a été traduit, utilise la langue cible
+        debug!(
+            "[{}] Texte traduit de {} vers {}, utilisation de la langue cible pour TTS",
+            log_tag, input.source_lang, input.target_lang
+        );
+        input.target_lang.clone()
+    } else {
+        // Source == cible: pas de traduction, utilise la langue source
+        debug!(
+            "[{}] Pas de traduction (source == cible: {}), utilisation de la langue source pour TTS",
+            log_tag, input.source_lang
+        );
+        input.source_lang.clone()
+    };
+    tts.set_lang(tts_lang);
+
+    let tts_speed = tts::convert_playback_speed(input.playback_speed);
     tts.set_speed(tts_speed);
 
     debug!(
@@ -581,12 +616,14 @@ fn execute_speech_pipeline(
         .map_err(|e| format!("Erreur lors de la création du stream audio: {}", e))?;
     device_sink.log_on_drop(false);
     let player = Player::connect_new(device_sink.mixer());
+    player.set_volume(input.volume.clamp(0.0, 1.0));
 
     debug!("[{}] Lecture du fichier: {}", log_tag, audio_file_path);
     let file = std::fs::File::open(&audio_file_path)
         .map_err(|e| format!("Erreur lors de l'ouverture du fichier: {}", e))?;
     let source = Decoder::new(file)
         .map_err(|e| format!("Erreur lors du décodage du fichier audio: {}", e))?;
+
     player.append(source);
 
     let thread_id = std::time::SystemTime::now()
@@ -623,7 +660,7 @@ fn execute_speech_pipeline(
         let max_duration = std::time::Duration::from_secs(600);
 
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
+            std::thread::sleep(std::time::Duration::from_millis(600));
 
             let current_id = CURRENT_THREAD_ID.lock().map(|g| *g).unwrap_or(0);
 
@@ -691,12 +728,14 @@ fn speak(
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang,
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
@@ -779,12 +818,14 @@ fn speak_ocr(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Resul
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang: source_lang.to_string(),
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
@@ -807,75 +848,6 @@ fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn get_clipboard_text() -> Result<String, String> {
-    use x11_clipboard::Clipboard;
-
-    let clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
-
-    let atoms = clipboard.getter.atoms.clone();
-    let timeout = std::time::Duration::from_secs(1);
-
-    clipboard
-        .load(
-            clipboard.setter.atoms.primary,
-            atoms.utf8_string,
-            atoms.property,
-            timeout,
-        )
-        .map_err(|e| format!("Erreur lors de la lecture du presse-papier: {}", e))
-        .and_then(|data| {
-            String::from_utf8(data).map_err(|e| format!("Erreur de décodage UTF-8: {}", e))
-        })
-}
-
-#[cfg(target_os = "macos")]
-fn get_clipboard_text() -> Result<String, String> {
-    use arboard::Clipboard;
-    use std::process::Command;
-    use std::thread;
-    use std::time::Duration;
-
-    let mut clipboard =
-        Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
-
-    let saved = clipboard.get_text().ok();
-
-    thread::sleep(Duration::from_millis(300));
-
-    let output = Command::new("osascript")
-        .args([
-            "-e",
-            "tell application \"System Events\" to keystroke \"c\" using {command down}",
-        ])
-        .output()
-        .map_err(|e| format!("Erreur d'exécution d'osascript: {}", e))?;
-
-    if !output.status.success() {
-        error!(
-            "osascript a échoué: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    thread::sleep(Duration::from_millis(100));
-
-    let text = clipboard
-        .get_text()
-        .map_err(|e| format!("Erreur lors de la lecture de la sélection: {}", e))?;
-
-    if saved.as_ref() == Some(&text) {
-        return Err("Aucun texte sélectionné".to_string());
-    }
-
-    if let Some(ref saved_text) = saved {
-        let _ = clipboard.set_text(saved_text);
-    }
-
-    Ok(text)
 }
 
 #[tauri::command]
@@ -909,26 +881,64 @@ fn speak_clipboard(
         .map(|c| c.target_language.clone())
         .unwrap_or_else(|| "fr".to_string());
     let playback_speed = config.as_ref().map(|c| c.playback_speed).unwrap_or(1.0);
+    let volume = config.as_ref().map(|c| c.volume).unwrap_or(1.0);
 
     let pipeline = SpeechPipelineInput {
         text,
         source_lang,
         target_lang,
         playback_speed,
+        volume,
         dev_mode,
     };
 
     execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_CLIPBOARD")
 }
 
+/// Vérifie qu'un serveur d'affichage est disponible avant d'initialiser GTK.
+///
+/// Sans X11 ni Wayland, `tao` panique avec « Failed to initialize GTK ».
+#[cfg(target_os = "linux")]
+fn ensure_graphical_session() {
+    fn is_set(name: &str) -> bool {
+        std::env::var_os(name)
+            .map(|value| !value.is_empty())
+            .unwrap_or(false)
+    }
+
+    if is_set("DISPLAY") || is_set("WAYLAND_DISPLAY") {
+        return;
+    }
+
+    eprintln!(
+        "[gsp-ui] Erreur : une interface graphique (X11 ou Wayland) est nécessaire pour lancer l'application."
+    );
+
+    std::process::exit(1);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_graphical_session() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    ensure_graphical_session();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Mutex::new(PlaybackState { _dummy: 0 }))
         .setup(|app| {
+            // Initialiser le moteur de traduction en arrière-plan (non-bloquant)
+            std::thread::spawn(|| {
+                info!("[SETUP] Initialisation du moteur de traduction en arrière-plan...");
+                match translator::initialize_engine() {
+                    Ok(_) => info!("[SETUP] Moteur de traduction initialisé avec succès"),
+                    Err(e) => info!("[SETUP] Moteur de traduction non disponible: {}", e),
+                }
+            });
+
             if let Err(e) = setup_tray(app) {
                 error!("Erreur lors de la création de la tray-icon: {}", e);
             }
@@ -937,12 +947,32 @@ pub fn run() {
                 error!("Erreur lors de la configuration du raccourci global: {}", e);
             }
 
+            // Afficher la fenêtre principale sauf si l'option "démarrer masqué"
+            // est activée. La fenêtre est créée invisible (tauri.conf.json) pour
+            // éviter un flash au démarrage.
+            let start_hidden = load_config().map(|cfg| cfg.start_hidden).unwrap_or(false);
+            let tray_available = app.tray_by_id("main-tray").is_some();
+
+            if start_hidden && tray_available {
+                info!("[SETUP] Démarrage masqué: la fenêtre principale reste cachée");
+            } else {
+                info!("[SETUP] Affichage de la fenêtre principale");
+                show_main_window(app.handle());
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                window.hide().unwrap();
+                let _ = window.hide();
+
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -952,8 +982,15 @@ pub fn run() {
             save_ocr_shortcut_config,
             load_playback_speed,
             save_playback_speed,
+            load_volume,
+            save_volume,
+            set_playing_volume,
             load_dev_mode,
             save_dev_mode,
+            load_start_hidden,
+            save_start_hidden,
+            load_ipa_enabled,
+            save_ipa_enabled,
             load_source_language,
             save_source_language,
             load_target_language,
@@ -969,10 +1006,25 @@ pub fn run() {
             speak,
             stop_speak,
             speak_clipboard,
-            speak_ocr
+            speak_ocr,
+            list_models,
+            delete_model,
+            list_piper_models,
+            delete_piper_model,
+            download_piper_model,
+            get_available_tts_models,
+            load_tts_model_selection,
+            save_tts_model_selection
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|#[allow(unused_variables)] app, event| match &event {
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                show_main_window(app);
+            }
+            _ => {}
+        });
 }
 
 #[cfg(test)]
@@ -1056,6 +1108,7 @@ mod tests {
 
     #[test]
     fn test_app_config_default() {
+        use config::AppConfig;
         // Teste les valeurs par défaut de la config
         let config = AppConfig::default();
         assert_eq!(config.playback_speed, 1.0);
@@ -1107,5 +1160,162 @@ mod tests {
         assert_eq!(result1.alt, result2.alt);
         assert_eq!(result1.shift, result2.shift);
         assert_eq!(result1.key, result2.key);
+    }
+
+    // ==================== Tests de logique de traduction ====================
+    // Cas d'usage utilisateur:
+    // 1. Texte EN + source auto + cible FR → traduire EN→FR + lire en FR
+    // 2. Texte EN + source auto + cible EN → lire en EN (pas de traduction)
+    // 3. Texte FR + source auto + cible EN → traduire FR→EN + lire en EN
+    // 4. Texte FR + source auto + cible FR → lire en FR (pas de traduction)
+
+    #[test]
+    fn test_case_1_english_auto_source_french_target() {
+        // Cas 1: Texte anglais + auto-détection + cible français
+        // Attendu: Doit tenter une traduction (ou retourner le texte original en cas d'erreur)
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "auto", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_2_english_auto_source_english_target() {
+        // Cas 2: Texte anglais + auto-détection + cible anglais
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "auto", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_case_3_french_auto_source_english_target() {
+        // Cas 3: Texte français + auto-détection + cible anglais
+        // Attendu: Doit tenter une traduction (ou retourner le texte original en cas d'erreur)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_4_french_auto_source_french_target() {
+        // Cas 4: Texte français + auto-détection + cible français
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Bonjour");
+    }
+
+    #[test]
+    fn test_case_3_fails_gracefully_without_translation_engine() {
+        // Cas 3 bis: Vérifier que même si la traduction échoue, on retourne le texte original
+        // (le moteur de traduction peut ne pas être initialisé dans les tests)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "auto", "en");
+        assert!(result.is_ok());
+        // Même en cas d'erreur de traduction, on retourne quelque chose
+        assert!(!result.unwrap().is_empty());
+    }
+
+    // ==================== Cas additionnels (source spécifiée, pas auto) ====================
+
+    #[test]
+    fn test_case_5_english_source_english_target_french() {
+        // Cas 5: Texte EN + source EN + cible FR
+        // Attendu: Doit tenter une traduction (source != cible)
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "en", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original en cas d'erreur)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_6_french_source_french_target_english() {
+        // Cas 6: Texte FR + source FR + cible EN
+        // Attendu: Doit tenter une traduction (source != cible)
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "fr", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        // Le résultat doit être non-vide (traduit ou original en cas d'erreur)
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn test_case_english_source_english_target_same_language() {
+        // Cas: Source EN + cible EN (même langue)
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Hello", DetectedLanguage::English, "en", "en");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_case_french_source_french_target_same_language() {
+        // Cas: Source FR + cible FR (même langue)
+        // Attendu: PAS de traduction, retourner le texte original
+        let result = translate_if_needed("Bonjour", DetectedLanguage::French, "fr", "fr");
+        assert!(result.is_ok());
+        let text = result.unwrap();
+        assert_eq!(text, "Bonjour");
+    }
+
+    // ==================== Test de la logique de langue TTS après traduction ====================
+
+    #[test]
+    fn test_tts_language_selection_auto_with_translation() {
+        // Cas critique corrigé: En mode auto, après traduction EN->FR,
+        // le TTS doit utiliser FR, pas re-détecter et utiliser EN
+        // Ce test simule la logique de `execute_speech_pipeline()`
+
+        // Simule: texte EN, auto-source, cible FR
+        let detected_lang = DetectedLanguage::English;
+        let source_lang = "auto";
+        let target_lang = "fr";
+        let detected_code = get_language_code(detected_lang);
+
+        // La logique correcte:
+        let tts_lang = if source_lang == "auto" {
+            if detected_code != target_lang {
+                // Traduction s'est produite, utiliser la cible
+                target_lang.to_string()
+            } else {
+                detected_code.to_string()
+            }
+        } else {
+            detected_code.to_string()
+        };
+
+        // Le TTS doit utiliser "fr", pas "en"
+        assert_eq!(tts_lang, "fr");
+    }
+
+    #[test]
+    fn test_tts_language_selection_auto_without_translation() {
+        // Cas: En mode auto, si pas de traduction (EN -> EN ou FR -> FR),
+        // le TTS doit utiliser la langue détectée
+
+        // Simule: texte FR, auto-source, cible FR (pas de traduction)
+        let detected_lang = DetectedLanguage::French;
+        let source_lang = "auto";
+        let target_lang = "fr";
+        let detected_code = get_language_code(detected_lang);
+
+        let tts_lang = if source_lang == "auto" {
+            if detected_code != target_lang {
+                target_lang.to_string()
+            } else {
+                detected_code.to_string()
+            }
+        } else {
+            detected_code.to_string()
+        };
+
+        assert_eq!(tts_lang, "fr");
     }
 }

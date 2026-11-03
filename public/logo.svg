@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gsp-tile" x1="64" y1="24" x2="456" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F07CB2"/>
+      <stop offset="0.52" stop-color="#DA5893"/>
+      <stop offset="1" stop-color="#B93A73"/>
+    </linearGradient>
+    <linearGradient id="gsp-gloss" x1="256" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App tile -->
+  <rect width="512" height="512" rx="116" fill="url(#gsp-tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#gsp-gloss)"/>
+
+  <!-- Speech bubble with a soft tail -->
+  <path d="M164 100H348C390 100 424 134 424 176V288C424 330 390 364 348 364H252L184 424C176 431 164 425 164 414V364H164C122 364 88 330 88 288V176C88 134 122 100 164 100Z" fill="#FFFFFF"/>
+
+  <!-- Play glyph: "read aloud", optically centred inside the bubble -->
+  <path d="M228 180L312 232L228 284Z" fill="#DA5893" stroke="#DA5893" stroke-width="34" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
