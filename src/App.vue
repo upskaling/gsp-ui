@@ -17,7 +17,9 @@ import { useLanguage } from './composables/useLanguage'
 import { useTtsModels } from './composables/useTtsModels'
 import { useKeyRecording } from './composables/useKeyRecording'
 
-const appVersion = '0.1.0'
+import pkg from '../package.json'
+
+const appVersion = pkg.version
 const activeSection = ref<SidebarSection>('playback')
 const devMode = ref(false)
 const startHidden = ref(false)
