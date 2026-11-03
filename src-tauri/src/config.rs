@@ -22,6 +22,14 @@ pub struct AppConfig {
     pub target_language: String,
     #[serde(default)]
     pub tts_model_selection: String,
+    #[serde(default = "default_true")]
+    pub ipa_enabled: bool,
+}
+
+/// Valeur par défaut d'un booléen activé (utilisée par serde pour les
+/// configurations existantes qui ne contiennent pas encore le champ).
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -73,6 +81,7 @@ impl Default for AppConfig {
             source_language: "auto".to_string(),
             target_language: "fr".to_string(),
             tts_model_selection: "piper:fr_FR-tom-medium".to_string(),
+            ipa_enabled: true,
         }
     }
 }

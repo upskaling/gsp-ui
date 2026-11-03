@@ -56,6 +56,7 @@ onMounted(async () => {
   // Load all configurations
   await playback.loadPlaybackSpeed()
   await playback.loadVolume()
+  await playback.loadIpaEnabled()
   await shortcuts.loadShortcutConfig()
   await shortcuts.loadOCRShortcutConfig()
   await language.loadSourceLanguage()
@@ -186,6 +187,7 @@ onUnmounted(() => {
             :tts-models="ttsModels.availableTtsModels.value"
             :selected-tts-model="ttsModels.selectedTtsModel.value"
             :source-language-options="language.sourceLanguageOptions"
+            :ipa-enabled="playback.ipaEnabled.value"
             @speak="playback.speakSelection"
             @speak-ocr="playback.speakOCR"
             @stop="playback.stopSpeaking"
@@ -193,6 +195,7 @@ onUnmounted(() => {
             @volume-change="playback.setVolume"
             @source-language-change="language.setSourceLanguage"
             @tts-model-change="ttsModels.setTtsModel"
+            @ipa-enabled-change="playback.setIpaEnabled"
           />
 
           <!-- Dev Mode Toggle (debug only) -->
