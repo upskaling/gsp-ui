@@ -4,9 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g., 0.2.0)"
+        description: "Version à publier (ex. 0.2.0). Laisser vide pour utiliser la version de src-tauri/tauri.conf.json"
         required: false
         type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   create-release:
@@ -15,60 +22,109 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release-id: ${{ steps.create-release.outputs.result }}
-      version: ${{ steps.get-version.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
+      ref: ${{ steps.ref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Get version from tauri.conf.json
-        id: get-version
+      - name: Resolve version
+        id: version
         shell: bash
         run: |
-          VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | cut -d'"' -f4)
-          echo "Application version from tauri.conf.json: $VERSION"
+          set -euo pipefail
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Déclenché par un tag vX.Y.Z : la version vient du tag
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | cut -d'"' -f4)
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version invalide : '$VERSION' (format attendu : X.Y.Z)"
+            exit 1
+          fi
+          echo "Version de la release : $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Update version if provided
+      - name: Update manifests if version provided
         if: ${{ github.event.inputs.version != '' }}
         shell: bash
         run: |
-          NEW_VERSION="${{ github.event.inputs.version }}"
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" src-tauri/tauri.conf.json
-          sed -i "s/version = \"[^\"]*\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
-          echo "VERSION=$NEW_VERSION" >> "$GITHUB_ENV"
-
-      - name: Set final version
-        shell: bash
-        run: |
-          if [ -z "$VERSION" ]; then
-            echo "VERSION=${{ steps.get-version.outputs.version }}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          # Ne remplacer que la PREMIÈRE occurrence de chaque fichier : la version
+          # du paquet. Un `sed` global corromprait les versions de dépendances.
+          sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$V\"/" src-tauri/tauri.conf.json
+          sed -i "0,/^version = \"[^\"]*\"/s//version = \"$V\"/" src-tauri/Cargo.toml
+          sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$V\"/" package.json
+          # Cargo.lock : uniquement l'entrée du paquet gsp-ui
+          sed -i "/^name = \"gsp-ui\"$/{n;s/^version = \"[^\"]*\"/version = \"$V\"/;}" src-tauri/Cargo.lock
+          echo "--- Versions après mise à jour ---"
+          grep -n '^version = "' src-tauri/Cargo.toml | head -1
+          grep -n '"version"' src-tauri/tauri.conf.json | head -1
+          grep -n '"version"' package.json | head -1
+          echo "--- Vérification : aucune dépendance ne doit être en vX.Y.Z ---"
+          if grep -n 'version = "v[0-9]' src-tauri/Cargo.toml; then
+            echo "::error::Cargo.toml contient des versions de dépendances corrompues"
+            exit 1
           fi
+          git --no-pager diff --stat
 
       - name: Commit version update
         if: ${{ github.event.inputs.version != '' }}
         shell: bash
         run: |
+          set -euo pipefail
+          BRANCH="${{ github.event.repository.default_branch }}"
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
-          git commit -m "chore: bump version to ${{ env.VERSION }}"
-          git push
+          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock package.json
+          git commit -m "chore: bump version to v${{ steps.version.outputs.version }}"
+          git push origin "HEAD:$BRANCH"
+
+      - name: Export commit to build
+        id: ref
+        shell: bash
+        run: echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Create Draft Release
         id: create-release
         uses: actions/github-script@v9
         with:
           script: |
-            const { data } = await github.rest.repos.createRelease({
+            const tag = `v${{ steps.version.outputs.version }}`;
+            const params = {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `v${{ env.VERSION || steps.get-version.outputs.version }}`,
-              name: `v${{ env.VERSION || steps.get-version.outputs.version }}`,
+              tag_name: tag,
+              name: tag,
+              target_commitish: '${{ steps.ref.outputs.ref }}',
               draft: true,
               prerelease: false,
-              generate_release_notes: true
-            })
-            return data.id
+              generate_release_notes: true,
+            };
+
+            try {
+              const { data } = await github.rest.repos.createRelease(params);
+              return data.id;
+            } catch (error) {
+              // Un tag/release existe déjà (relance du workflow) : on le réutilise.
+              if (error.status === 422 && String(error.message).includes('already_exists')) {
+                const { data } = await github.rest.repos.getReleaseByTag({
+                  owner: params.owner,
+                  repo: params.repo,
+                  tag: tag,
+                });
+                console.log(`Release ${tag} déjà existante (id ${data.id}), réutilisation.`);
+                return data.id;
+              }
+              throw error;
+            }
 
   build-linux:
     permissions:
@@ -78,6 +134,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.create-release.outputs.ref }}
 
       - name: Install system dependencies
         run: |
@@ -111,12 +169,91 @@ jobs:
           name: linux-builds
           path: src-tauri/target/release/bundle/
 
-      - name: Get version
-        id: get-version
-        shell: bash
-        run: |
-          VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | cut -d'"' -f4)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Upload release assets
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const bundlePath = 'src-tauri/target/release/bundle';
+            const releaseId = ${{ needs.create-release.outputs.release-id }};
+            const wanted = ['.deb', '.AppImage'];
+
+            const collect = (dir) => {
+              const files = [];
+              if (!fs.existsSync(dir)) return files;
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) files.push(...collect(full));
+                else if (wanted.some((ext) => entry.name.endsWith(ext))) files.push(full);
+              }
+              return files;
+            };
+
+            const { data: existing } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+            const already = new Set(existing.map((a) => a.name));
+
+            for (const file of collect(bundlePath)) {
+              const name = path.basename(file);
+              if (already.has(name)) {
+                console.log(`Asset déjà présent, ignoré : ${name}`);
+                continue;
+              }
+              console.log(`Upload de ${name}...`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name,
+                data: fs.readFileSync(file),
+              });
+            }
+
+  build-macos:
+    permissions:
+      contents: write
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.create-release.outputs.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: macos
+
+      - name: Install pnpm dependencies
+        run: pnpm install
+
+      # Build non signé (pas de certificat Apple) : le dmg est produit mais
+      # Gatekeeper demandera un clic droit > Ouvrir au premier lancement.
+      - name: Build application
+        run: pnpm tauri build --bundles dmg
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: src-tauri/target/release/bundle/
 
       - name: Upload release assets
         uses: actions/github-script@v9
@@ -125,50 +262,48 @@ jobs:
             const fs = require('fs');
             const path = require('path');
             const bundlePath = 'src-tauri/target/release/bundle';
+            const releaseId = ${{ needs.create-release.outputs.release-id }};
+            const wanted = ['.dmg'];
 
-            async function uploadAssets() {
+            const collect = (dir) => {
               const files = [];
-
-              // Collect .deb files
-              const debPath = path.join(bundlePath, 'deb/x86_64');
-              if (fs.existsSync(debPath)) {
-                fs.readdirSync(debPath).forEach(file => {
-                  if (file.endsWith('.deb')) {
-                    files.push(path.join(debPath, file));
-                  }
-                });
+              if (!fs.existsSync(dir)) return files;
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) files.push(...collect(full));
+                else if (wanted.some((ext) => entry.name.endsWith(ext))) files.push(full);
               }
+              return files;
+            };
 
-              // Collect AppImage files
-              const appImagePath = path.join(bundlePath, 'appimage');
-              if (fs.existsSync(appImagePath)) {
-                fs.readdirSync(appImagePath).forEach(file => {
-                  if (file.endsWith('.AppImage')) {
-                    files.push(path.join(appImagePath, file));
-                  }
-                });
-              }
+            const { data: existing } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+            const already = new Set(existing.map((a) => a.name));
 
-              // Upload each file
-              for (const file of files) {
-                console.log(`Uploading ${file}...`);
-                const fileData = fs.readFileSync(file);
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: ${{ needs.create-release.outputs.release-id }},
-                  name: path.basename(file),
-                  data: fileData,
-                });
+            for (const file of collect(bundlePath)) {
+              const name = path.basename(file);
+              if (already.has(name)) {
+                console.log(`Asset déjà présent, ignoré : ${name}`);
+                continue;
               }
+              console.log(`Upload de ${name}...`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name,
+                data: fs.readFileSync(file),
+              });
             }
-
-            await uploadAssets();
 
   publish-release:
     permissions:
       contents: write
-    needs: [create-release, build-linux]
+    needs: [create-release, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Publish Release
