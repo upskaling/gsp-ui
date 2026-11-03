@@ -1,5 +1,6 @@
 mod clipboard;
 mod config;
+mod ipa;
 mod language_detector;
 mod model_downloader;
 mod ocr;
@@ -12,6 +13,7 @@ mod tts;
 
 use clipboard::get_clipboard_text;
 use config::{load_config, update_config, ClipboardShortcut};
+use ipa::{contains_ipa, to_pronounceable};
 use language_detector::{detect_language, DetectedLanguage};
 use log::{debug, error, info};
 use ocr::tesseract;
@@ -336,6 +338,16 @@ fn save_start_hidden(enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn load_ipa_enabled() -> Result<bool, String> {
+    load_config().map(|cfg| cfg.ipa_enabled)
+}
+
+#[tauri::command]
+fn save_ipa_enabled(enabled: bool) -> Result<(), String> {
+    update_config(|cfg| cfg.ipa_enabled = enabled)
+}
+
+#[tauri::command]
 fn load_source_language() -> Result<String, String> {
     load_config().map(|cfg| cfg.source_language)
 }
@@ -492,7 +504,18 @@ fn execute_speech_pipeline(
 ) -> Result<(), String> {
     debug!("[{}] Début avec texte: {}", log_tag, input.text);
 
-    let text_to_process = if input.dev_mode {
+    let ipa_enabled = load_config().map(|cfg| cfg.ipa_enabled).unwrap_or(true);
+    let has_ipa = ipa_enabled && contains_ipa(&input.text);
+
+    let text_to_process = if has_ipa {
+        debug!(
+            "[{}] Transcription en alphabet phonétique détectée, conversion en graphie prononçable",
+            log_tag
+        );
+        let converted = to_pronounceable(&input.text, &input.target_lang);
+        debug!("[{}] Texte API converti: {}", log_tag, converted);
+        converted
+    } else if input.dev_mode {
         debug!(
             "[{}] Mode développeur activé, application de read_vars",
             log_tag
@@ -508,12 +531,22 @@ fn execute_speech_pipeline(
     let detected_lang = detect_language(&cleaned_text);
     debug!("[{}] Langue détectée: {:?}", log_tag, detected_lang);
 
-    let text_to_speak = translate_if_needed(
-        &cleaned_text,
-        detected_lang,
-        &input.source_lang,
-        &input.target_lang,
-    )?;
+    let text_to_speak = if has_ipa {
+        // Le texte a déjà été transcrit dans la langue de lecture : le traduire
+        // n'aurait pas de sens et altérerait la prononciation.
+        debug!(
+            "[{}] Traduction ignorée : le texte contient une transcription API",
+            log_tag
+        );
+        cleaned_text.clone()
+    } else {
+        translate_if_needed(
+            &cleaned_text,
+            detected_lang,
+            &input.source_lang,
+            &input.target_lang,
+        )?
+    };
 
     {
         let mut sink_guard = CURRENT_SINK
@@ -956,6 +989,8 @@ pub fn run() {
             save_dev_mode,
             load_start_hidden,
             save_start_hidden,
+            load_ipa_enabled,
+            save_ipa_enabled,
             load_source_language,
             save_source_language,
             load_target_language,

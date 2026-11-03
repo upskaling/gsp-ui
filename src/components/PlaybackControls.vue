@@ -13,6 +13,7 @@ interface Props {
   ttsModels: TtsModel[]
   selectedTtsModel: string
   sourceLanguageOptions: LanguageOption[]
+  ipaEnabled: boolean
 }
 
 interface Emits {
@@ -23,6 +24,7 @@ interface Emits {
   (e: 'volume-change', volume: number): void
   (e: 'source-language-change', lang: string): void
   (e: 'tts-model-change', modelId: string): void
+  (e: 'ipa-enabled-change', enabled: boolean): void
 }
 
 const props = withDefaults(defineProps<Props>(), {})
@@ -131,6 +133,23 @@ const modelSelectOptions = computed(() =>
         />
       </div>
     </div>
+
+    <!-- International Phonetic Alphabet support -->
+    <label class="flex items-start gap-2 cursor-pointer text-sm">
+      <input
+        type="checkbox"
+        :checked="ipaEnabled"
+        @change="$emit('ipa-enabled-change', ($event.target as HTMLInputElement).checked)"
+        class="w-4 h-4 mt-0.5"
+      />
+      <span>
+        🔤 Prononcer l'alphabet phonétique international (API)
+        <span class="block text-xs text-mid-gray">
+          Les transcriptions comme <code>/bɔ̃ʒuʁ/</code> ou <code>[həˈloʊ]</code> sont lues à voix
+          haute.
+        </span>
+      </span>
+    </label>
 
   </div>
 </template>

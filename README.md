@@ -4,6 +4,8 @@
 
 gsp-ui est une application de bureau open source qui convertit le texte en parole via une touche de raccourci global. Appuyez sur la touche, le texte du presse-papiers est lu à haute voix par Piper TTS directement sur votre ordinateur.
 
+Les mots et phrases écrits en **alphabet phonétique international** (API), par exemple `/bɔ̃ʒuʁ/` ou `[həˈloʊ]`, sont automatiquement reconnus et prononcés correctement. Cette fonction peut être désactivée depuis l'écran de lecture.
+
 ## 📸 Aperçu
 
 ![Capture d'écran de gsp-ui](assets/screenshot.png)

@@ -6,6 +6,7 @@ export function usePlayback() {
   const playbackSpeed = ref(1.0)
   const speedOptions = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
   const volume = ref(1.0)
+  const ipaEnabled = ref(true)
 
   async function speakSelection() {
     console.log('[speakSelection] Début')
@@ -96,11 +97,32 @@ export function usePlayback() {
     }
   }
 
+  async function loadIpaEnabled() {
+    try {
+      ipaEnabled.value = await invoke('load_ipa_enabled')
+      console.log('[loadIpaEnabled] Lecture API activée:', ipaEnabled.value)
+    } catch (error) {
+      console.error('Erreur lors du chargement du réglage API:', error)
+    }
+  }
+
+  async function setIpaEnabled(enabled: boolean) {
+    console.log('[setIpaEnabled] Nouvelle valeur:', enabled)
+    ipaEnabled.value = enabled
+    try {
+      await invoke('save_ipa_enabled', { enabled })
+      console.log('[setIpaEnabled] Réglage API sauvegardé')
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde du réglage API:', error)
+    }
+  }
+
   return {
     isSpeaking,
     playbackSpeed,
     speedOptions,
     volume,
+    ipaEnabled,
     speakSelection,
     speakOCR,
     stopSpeaking,
@@ -108,5 +130,7 @@ export function usePlayback() {
     setPlaybackSpeed,
     loadVolume,
     setVolume,
+    loadIpaEnabled,
+    setIpaEnabled,
   }
 }
