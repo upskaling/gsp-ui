@@ -22,23 +22,20 @@ pub fn get_clipboard_text() -> Result<String, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn has_accessibility_permission() -> bool {
-    extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
-    unsafe { AXIsProcessTrusted() }
-}
-
-#[cfg(target_os = "macos")]
 pub fn get_clipboard_text() -> Result<String, String> {
     use arboard::Clipboard;
     use std::thread;
     use std::time::Duration;
 
-    if !has_accessibility_permission() {
+    // `request_accessibility_access` interroge TCC en direct et affiche la
+    // boîte de dialogue système la première fois. Sans cette permission,
+    // `simulate_cmd_c` ne peut pas envoyer Cmd+C à l'application active.
+    if !crate::permissions::request_accessibility_access() {
         return Err(
-            "Permission d'accessibilité requise. Ajoutez l'application dans \
-             Réglages Système > Confidentialité > Accessibilité"
+            "Permission d'accessibilité requise. Activez gsp-ui dans Réglages Système > \
+             Confidentialité et sécurité > Accessibilité (nommée « Contrôle des appareils \
+             et accès aux données » sur macOS 27 et versions ultérieures), puis relancez \
+             l'application."
                 .to_string(),
         );
     }
@@ -54,7 +51,7 @@ pub fn get_clipboard_text() -> Result<String, String> {
         thread::sleep(Duration::from_millis(10));
 
         if let Ok(text) = clipboard.get_text() {
-            if !text.is_empty() && saved_text.as_ref().map_or(true, |s| s != &text) {
+            if !text.is_empty() && saved_text.as_ref() != Some(&text) {
                 if let Some(ref saved) = saved_text {
                     let _ = clipboard.set_text(saved);
                 }
@@ -65,8 +62,8 @@ pub fn get_clipboard_text() -> Result<String, String> {
 
     Err(
         "Impossible de récupérer le texte sélectionné. Vérifiez que \
-         l'application a les permissions d'accessibilité et que du texte \
-         est sélectionné."
+         l'application a la permission Accessibilité et que du texte est \
+         sélectionné."
             .to_string(),
     )
 }

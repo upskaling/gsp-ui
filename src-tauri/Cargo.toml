@@ -48,6 +48,7 @@ x11-clipboard = "0.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard = "3"
+core-foundation = "0.10"
 core-graphics = "0.23"
 
 

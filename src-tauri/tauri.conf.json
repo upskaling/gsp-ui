@@ -34,7 +34,8 @@
     ],
     "macOS": {
       "entitlements": "gsp-ui.entitlements",
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
     }
   }
 }

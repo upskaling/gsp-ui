@@ -244,8 +244,11 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install
 
-      # Build non signé (pas de certificat Apple) : le dmg est produit mais
-      # Gatekeeper demandera un clic droit > Ouvrir au premier lancement.
+      # Signature ad-hoc (pas de certificat Apple) : le bundle est signé avec
+      # l'identité "-" configurée dans tauri.conf.json pour que macOS puisse
+      # l'identifier de façon stable entre deux lancements. Gatekeeper demandera
+      # quand même un clic droit > Ouvrir au premier lancement, et l'autorisation
+      # Accessibilité devra être réaccordée après chaque mise à jour.
       - name: Build application
         run: pnpm tauri build --bundles dmg
 

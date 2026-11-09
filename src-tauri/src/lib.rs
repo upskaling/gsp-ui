@@ -4,6 +4,7 @@ pub mod ipa;
 mod language_detector;
 mod model_downloader;
 mod ocr;
+mod permissions;
 mod screenshooter;
 mod shortcut;
 pub mod textutils;
@@ -56,7 +57,7 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
     Ok(Image::new(static_data, width, height))
 }
 
-fn show_main_window(app: &AppHandle) {
+fn show_main_window_impl(app: &AppHandle) {
     if let Some(main_window) = app.get_webview_window("main") {
         let _ = main_window.unminimize();
         let _ = main_window.show();
@@ -365,6 +366,26 @@ fn load_target_language() -> Result<String, String> {
 #[tauri::command]
 fn save_target_language(language: String) -> Result<(), String> {
     update_config(|cfg| cfg.target_language = language)
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) {
+    show_main_window_impl(&app);
+}
+
+#[tauri::command]
+fn check_accessibility_permission() -> bool {
+    permissions::is_accessibility_granted()
+}
+
+#[tauri::command]
+fn request_accessibility_permission() -> bool {
+    permissions::request_accessibility_access()
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    permissions::open_accessibility_settings()
 }
 
 #[tauri::command]
@@ -957,7 +978,7 @@ pub fn run() {
                 info!("[SETUP] Démarrage masqué: la fenêtre principale reste cachée");
             } else {
                 info!("[SETUP] Affichage de la fenêtre principale");
-                show_main_window(app.handle());
+                show_main_window_impl(app.handle());
             }
 
             Ok(())
@@ -995,6 +1016,10 @@ pub fn run() {
             save_source_language,
             load_target_language,
             save_target_language,
+            show_main_window,
+            check_accessibility_permission,
+            request_accessibility_permission,
+            open_accessibility_settings,
             reset_shortcuts_to_default,
             shortcut::get_binding,
             shortcut::get_all_bindings,
@@ -1021,7 +1046,7 @@ pub fn run() {
         .run(|#[allow(unused_variables)] app, event| match &event {
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
-                show_main_window(app);
+                show_main_window_impl(app);
             }
             _ => {}
         });

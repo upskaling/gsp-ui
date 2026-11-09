@@ -9,6 +9,7 @@ import PlaybackControls from './components/PlaybackControls.vue'
 import ShortcutConfigPanel from './components/ShortcutConfigPanel.vue'
 import ModelsPage from './components/ModelsPage.vue'
 import AboutDialog from './components/AboutDialog.vue'
+import PermissionDialog from './components/PermissionDialog.vue'
 
 import { usePlayback } from './composables/usePlayback'
 import { useShortcuts } from './composables/useShortcuts'
@@ -16,6 +17,7 @@ import { useModels } from './composables/useModels'
 import { useLanguage } from './composables/useLanguage'
 import { useTtsModels } from './composables/useTtsModels'
 import { useKeyRecording } from './composables/useKeyRecording'
+import { usePermissions } from './composables/usePermissions'
 
 import pkg from '../package.json'
 
@@ -33,6 +35,19 @@ const models = useModels()
 const language = useLanguage()
 const ttsModels = useTtsModels()
 const keyRecording = useKeyRecording(shortcuts)
+const permissions = usePermissions()
+
+async function handleSpeak() {
+  if (!(await permissions.ensureAccessibility())) {
+    return
+  }
+
+  await playback.speakSelection()
+}
+
+async function handleSpeakOCR() {
+  await playback.speakOCR()
+}
 
 async function loadDevMode() {
   try {
@@ -90,6 +105,9 @@ onMounted(async () => {
   await loadStartHidden()
   await models.loadModels()
 
+  // Vérifie l'autorisation macOS sans afficher de dialogue au démarrage.
+  await permissions.refreshAccessibilityPermission()
+
   // Setup keyboard event listeners
   window.addEventListener('keydown', keyRecording.handleKeydown as unknown as EventListener)
   window.addEventListener('keyup', keyRecording.handleKeyup as unknown as EventListener)
@@ -121,9 +139,11 @@ onMounted(async () => {
       if (playback.isSpeaking.value) {
         console.log('[Global Shortcut] Appel de stopSpeaking()')
         await playback.stopSpeaking()
-      } else {
+      } else if (await permissions.ensureAccessibility()) {
         console.log('[Global Shortcut] Appel de speakSelection()')
         await playback.speakSelection()
+      } else {
+        console.log('[Global Shortcut] Permission Accessibilité manquante, lecture annulée')
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -213,8 +233,8 @@ onUnmounted(() => {
             :selected-tts-model="ttsModels.selectedTtsModel.value"
             :source-language-options="language.sourceLanguageOptions"
             :ipa-enabled="playback.ipaEnabled.value"
-            @speak="playback.speakSelection"
-            @speak-ocr="playback.speakOCR"
+            @speak="handleSpeak"
+            @speak-ocr="handleSpeakOCR"
             @stop="playback.stopSpeaking"
             @speed-change="playback.setPlaybackSpeed"
             @volume-change="playback.setVolume"
@@ -318,5 +338,12 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <PermissionDialog
+      v-if="permissions.showPermissionDialog.value"
+      @close="permissions.dismissPermissionDialog"
+      @open-settings="permissions.openAccessibilitySettings"
+      @retry="permissions.retryAccessibilityPermission"
+    />
   </main>
 </template>
