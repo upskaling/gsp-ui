@@ -26,6 +26,15 @@ pub struct AppConfig {
     pub tts_model_selection: String,
     #[serde(default = "default_true")]
     pub ipa_enabled: bool,
+    /// Délai (en secondes) après lequel la fenêtre masquée est détruite pour
+    /// libérer les processus WebKit. `0` désactive la libération.
+    #[serde(default = "default_ui_release_timeout_secs")]
+    pub ui_release_timeout_secs: u64,
+}
+
+/// Délai par défaut avant libération de l'interface (5 minutes).
+fn default_ui_release_timeout_secs() -> u64 {
+    300
 }
 
 /// Valeur par défaut d'un booléen activé (utilisée par serde pour les
@@ -85,6 +94,7 @@ impl Default for AppConfig {
             target_language: "fr".to_string(),
             tts_model_selection: "piper:fr_FR-tom-medium".to_string(),
             ipa_enabled: true,
+            ui_release_timeout_secs: default_ui_release_timeout_secs(),
         }
     }
 }

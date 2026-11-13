@@ -20,12 +20,14 @@ use log::{debug, error, info};
 use ocr::tesseract;
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use screenshooter::screenshot_region;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
 use textutils::{preprocess_text, read_vars};
 use translator::translate;
 
@@ -58,16 +60,97 @@ fn load_icon_for_tray() -> Result<Image<'static>, tauri::Error> {
 }
 
 fn show_main_window_impl(app: &AppHandle) {
-    if let Some(main_window) = app.get_webview_window("main") {
-        let _ = main_window.unminimize();
-        let _ = main_window.show();
-        let _ = main_window.set_focus();
+    cancel_ui_release();
 
-        #[cfg(target_os = "macos")]
-        {
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-        }
+    let main_window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => match create_main_window(app) {
+            Ok(window) => {
+                info!("[UI] Fenêtre recréée après libération de l'interface");
+                window
+            }
+            Err(e) => {
+                error!("[UI] Impossible de recréer la fenêtre principale: {}", e);
+                return;
+            }
+        },
+    };
+
+    let _ = main_window.unminimize();
+    let _ = main_window.show();
+    let _ = main_window.set_focus();
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     }
+}
+
+/// Crée la fenêtre principale. Utilisée au premier lancement par Tauri et
+/// lorsqu'on recharge l'interface après sa libération.
+fn create_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("gsp-ui")
+        .inner_size(800.0, 600.0)
+        .visible(false)
+        .build()
+}
+
+/// Masque la fenêtre principale et programme la libération de l'interface.
+fn hide_main_window(window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+    schedule_ui_release(window.app_handle());
+}
+
+/// Identifiant de la libération programmée en cours. Incrémenté pour annuler
+/// une libération en attente (réouverture de la fenêtre ou changement de délai).
+static UI_RELEASE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Programme la destruction du webview après le délai configuré, afin de
+/// libérer les processus WebKit (`WebKitWebProcess`, `WebKitNetworkProcess`)
+/// qui restent vivants même quand la fenêtre est cachée.
+fn schedule_ui_release(app: &AppHandle) {
+    let generation = UI_RELEASE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let timeout_secs = load_config()
+        .map(|cfg| cfg.ui_release_timeout_secs)
+        .unwrap_or(300);
+
+    if timeout_secs == 0 {
+        debug!("[UI] Libération de l'interface désactivée");
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(timeout_secs));
+
+        if UI_RELEASE_GENERATION.load(Ordering::SeqCst) != generation {
+            // Réouverture (ou nouvelle programmation) entre-temps.
+            return;
+        }
+
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+
+        if window.is_visible().unwrap_or(true) {
+            return;
+        }
+
+        info!(
+            "[UI] Fenêtre masquée depuis {} s: libération de l'interface graphique",
+            timeout_secs
+        );
+        if let Err(e) = window.destroy() {
+            error!("[UI] Impossible de détruire la fenêtre principale: {}", e);
+        }
+    });
+}
+
+/// Annule la libération programmée, s'il y en a une.
+fn cancel_ui_release() {
+    UI_RELEASE_GENERATION.fetch_add(1, Ordering::SeqCst);
 }
 
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), String> {
@@ -168,10 +251,7 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
                 app.exit(0);
             }
             "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window_impl(app);
             }
             _ => {}
         })
@@ -181,11 +261,13 @@ fn setup_tray(app: &tauri::App) -> Result<(), tauri::Error> {
             if matches!(event, TrayIconEvent::Click { .. }) {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
-                        let _ = window.hide();
+                        hide_main_window(&window);
                     } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
+                        show_main_window_impl(&app_handle);
                     }
+                } else {
+                    // L'interface a été libérée : on la recharge.
+                    show_main_window_impl(&app_handle);
                 }
             }
         })
@@ -336,6 +418,16 @@ fn load_start_hidden() -> Result<bool, String> {
 #[tauri::command]
 fn save_start_hidden(enabled: bool) -> Result<(), String> {
     update_config(|cfg| cfg.start_hidden = enabled)
+}
+
+#[tauri::command]
+fn load_ui_release_timeout() -> Result<u64, String> {
+    load_config().map(|cfg| cfg.ui_release_timeout_secs)
+}
+
+#[tauri::command]
+fn save_ui_release_timeout(seconds: u64) -> Result<(), String> {
+    update_config(|cfg| cfg.ui_release_timeout_secs = seconds.min(86_400))
 }
 
 #[tauri::command]
@@ -519,7 +611,6 @@ struct SpeechPipelineInput {
 
 fn execute_speech_pipeline(
     input: SpeechPipelineInput,
-    _state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,
     log_tag: &str,
 ) -> Result<(), String> {
@@ -735,7 +826,7 @@ fn execute_speech_pipeline(
 #[tauri::command]
 fn speak(
     text: String,
-    state: State<Mutex<PlaybackState>>,
+    _state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let config = load_config().ok();
@@ -760,11 +851,17 @@ fn speak(
         dev_mode,
     };
 
-    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK")
+    execute_speech_pipeline(pipeline, app_handle, "SPEAK")
 }
 
 #[tauri::command]
-fn speak_ocr(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+fn speak_ocr(_state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
+    run_speak_ocr(app_handle)
+}
+
+/// Logique OCR partagée entre la commande Tauri et les raccourcis globaux
+/// (utilisée quand l'interface graphique a été libérée).
+pub(crate) fn run_speak_ocr(app_handle: AppHandle) -> Result<(), String> {
     use std::fs;
     use std::time::SystemTime;
 
@@ -850,11 +947,16 @@ fn speak_ocr(state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Resul
         dev_mode,
     };
 
-    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_OCR")
+    execute_speech_pipeline(pipeline, app_handle, "SPEAK_OCR")
 }
 
 #[tauri::command]
 fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
+    run_stop_speak()
+}
+
+/// Arrête la lecture en cours (utilisable sans interface graphique).
+pub(crate) fn run_stop_speak() -> Result<(), String> {
     debug!("[STOP_SPEAK] Début de stop_speak()");
     let mut sink_guard = CURRENT_SINK
         .lock()
@@ -873,9 +975,15 @@ fn stop_speak(_state: State<Mutex<PlaybackState>>) -> Result<(), String> {
 
 #[tauri::command]
 fn speak_clipboard(
-    state: State<Mutex<PlaybackState>>,
+    _state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
+    run_speak_clipboard(app_handle)
+}
+
+/// Logique presse-papier partagée entre la commande Tauri et les raccourcis
+/// globaux (utilisée quand l'interface graphique a été libérée).
+pub(crate) fn run_speak_clipboard(app_handle: AppHandle) -> Result<(), String> {
     debug!("[SPEAK_CLIPBOARD] Début de speak_clipboard()");
 
     let text = match get_clipboard_text() {
@@ -913,7 +1021,28 @@ fn speak_clipboard(
         dev_mode,
     };
 
-    execute_speech_pipeline(pipeline, state, app_handle, "SPEAK_CLIPBOARD")
+    execute_speech_pipeline(pipeline, app_handle, "SPEAK_CLIPBOARD")
+}
+
+/// Indique si un son est en cours de lecture (utilisé par les raccourcis
+/// globaux quand l'interface graphique est libérée).
+pub(crate) fn is_audio_playing() -> bool {
+    CURRENT_SINK
+        .lock()
+        .map(|guard| {
+            guard
+                .as_ref()
+                .map(|playback| !playback.player.empty())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+/// Permet à l'interface (éventuellement rechargée) de retrouver l'état de
+/// lecture courant.
+#[tauri::command]
+fn is_playing() -> bool {
+    is_audio_playing()
 }
 
 /// Vérifie qu'un serveur d'affichage est disponible avant d'initialiser GTK.
@@ -976,6 +1105,9 @@ pub fn run() {
 
             if start_hidden && tray_available {
                 info!("[SETUP] Démarrage masqué: la fenêtre principale reste cachée");
+                // La fenêtre n'a jamais été affichée : on programme aussi sa
+                // libération pour ne pas garder WebKit en mémoire.
+                schedule_ui_release(app.handle());
             } else {
                 info!("[SETUP] Affichage de la fenêtre principale");
                 show_main_window_impl(app.handle());
@@ -987,6 +1119,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                schedule_ui_release(window.app_handle());
 
                 #[cfg(target_os = "macos")]
                 {
@@ -1010,6 +1143,8 @@ pub fn run() {
             save_dev_mode,
             load_start_hidden,
             save_start_hidden,
+            load_ui_release_timeout,
+            save_ui_release_timeout,
             load_ipa_enabled,
             save_ipa_enabled,
             load_source_language,
@@ -1030,6 +1165,7 @@ pub fn run() {
             shortcut::format_shortcut_binding,
             speak,
             stop_speak,
+            is_playing,
             speak_clipboard,
             speak_ocr,
             list_models,
@@ -1043,7 +1179,14 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|#[allow(unused_variables)] app, event| match &event {
+        .run(|#[allow(unused_variables)] app, event| match event {
+            // La destruction de la fenêtre (libération de l'interface) ne doit
+            // pas quitter l'application : elle reste active dans la barre système.
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
                 show_main_window_impl(app);

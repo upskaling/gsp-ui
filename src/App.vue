@@ -10,6 +10,7 @@ import ShortcutConfigPanel from './components/ShortcutConfigPanel.vue'
 import ModelsPage from './components/ModelsPage.vue'
 import AboutDialog from './components/AboutDialog.vue'
 import PermissionDialog from './components/PermissionDialog.vue'
+import SelectField from './components/SelectField.vue'
 
 import { usePlayback } from './composables/usePlayback'
 import { useShortcuts } from './composables/useShortcuts'
@@ -25,6 +26,15 @@ const appVersion = pkg.version
 const activeSection = ref<SidebarSection>('playback')
 const devMode = ref(false)
 const startHidden = ref(false)
+const uiReleaseTimeout = ref(300)
+
+const uiReleaseTimeoutOptions = [
+  { value: '0', label: 'Jamais' },
+  { value: '60', label: '1 minute' },
+  { value: '300', label: '5 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+]
 
 let shortcutInProgress = false
 let unlisten: (() => void)[] = []
@@ -91,6 +101,27 @@ async function toggleStartHidden() {
   }
 }
 
+async function loadUiReleaseTimeout() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    uiReleaseTimeout.value = await invoke('load_ui_release_timeout')
+    console.log('[loadUiReleaseTimeout] Délai de libération chargé:', uiReleaseTimeout.value)
+  } catch (error) {
+    console.error('Erreur lors du chargement du délai de libération:', error)
+  }
+}
+
+async function setUiReleaseTimeout(value: string) {
+  uiReleaseTimeout.value = Number(value)
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    console.log('[setUiReleaseTimeout] Sauvegarde du délai de libération:', uiReleaseTimeout.value)
+    await invoke('save_ui_release_timeout', { seconds: uiReleaseTimeout.value })
+  } catch (error) {
+    console.error('Erreur lors de la sauvegarde du délai de libération:', error)
+  }
+}
+
 onMounted(async () => {
   // Load all configurations
   await playback.loadPlaybackSpeed()
@@ -103,10 +134,20 @@ onMounted(async () => {
   await ttsModels.loadSelectedTtsModel()
   await loadDevMode()
   await loadStartHidden()
+  await loadUiReleaseTimeout()
   await models.loadModels()
 
   // Vérifie l'autorisation macOS sans afficher de dialogue au démarrage.
   await permissions.refreshAccessibilityPermission()
+
+  // L'interface peut être rechargée alors qu'une lecture lancée sans GUI est
+  // encore en cours : on resynchronise l'état du bouton.
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    playback.isSpeaking.value = await invoke('is_playing')
+  } catch (error) {
+    console.error("Erreur lors de la récupération de l'état de lecture:", error)
+  }
 
   // Setup keyboard event listeners
   window.addEventListener('keydown', keyRecording.handleKeydown as unknown as EventListener)
@@ -258,6 +299,23 @@ onUnmounted(() => {
                 </span>
               </span>
             </label>
+          </div>
+
+          <!-- UI Release Timeout -->
+          <div class="mt-6 p-4 bg-mid-gray/10 rounded">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm">🧹 Libérer l'interface après</span>
+              <SelectField
+                id="ui-release-timeout"
+                :model-value="String(uiReleaseTimeout)"
+                :options="uiReleaseTimeoutOptions"
+                @update:model-value="setUiReleaseTimeout"
+              />
+            </div>
+            <p class="text-xs opacity-60 mt-2">
+              Une fois la fenêtre masquée, l'interface graphique est libérée après ce délai afin de réduire la mémoire
+              utilisée. Elle est rechargée automatiquement à la réouverture. Les raccourcis clavier restent actifs.
+            </p>
           </div>
 
           <!-- Dev Mode Toggle (debug only) -->
