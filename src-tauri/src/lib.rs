@@ -823,7 +823,9 @@ fn execute_speech_pipeline(
     Ok(())
 }
 
-#[tauri::command]
+// `async` : la synthèse est bloquante et bloquerait la boucle GTK, qui doit
+// rester libre pour répondre aux requêtes X11 (presse-papier, etc.).
+#[tauri::command(async)]
 fn speak(
     text: String,
     _state: State<Mutex<PlaybackState>>,
@@ -854,7 +856,8 @@ fn speak(
     execute_speech_pipeline(pipeline, app_handle, "SPEAK")
 }
 
-#[tauri::command]
+// `async` : capture + OCR + synthèse sont bloquants (voir `speak`).
+#[tauri::command(async)]
 fn speak_ocr(_state: State<Mutex<PlaybackState>>, app_handle: AppHandle) -> Result<(), String> {
     run_speak_ocr(app_handle)
 }
@@ -973,7 +976,10 @@ pub(crate) fn run_stop_speak() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+// `async` : sans cela la commande tourne sur le thread principal et empêche
+// WebKit de répondre à la requête de sélection X11, ce qui provoque
+// « Selection timed out » quand le texte est sélectionné dans gsp-ui.
+#[tauri::command(async)]
 fn speak_clipboard(
     _state: State<Mutex<PlaybackState>>,
     app_handle: AppHandle,

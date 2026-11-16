@@ -6,7 +6,9 @@ pub fn get_clipboard_text() -> Result<String, String> {
         Clipboard::new().map_err(|e| format!("Impossible d'accéder au presse-papier: {}", e))?;
 
     let atoms = clipboard.getter.atoms.clone();
-    let timeout = std::time::Duration::from_secs(1);
+    // Certains propriétaires de sélection (navigateurs, XWayland) mettent
+    // plusieurs secondes à répondre.
+    let timeout = std::time::Duration::from_secs(3);
 
     clipboard
         .load(
