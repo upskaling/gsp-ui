@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import './styles/theme.css'
 import './App.css'
@@ -61,7 +62,6 @@ async function handleSpeakOCR() {
 
 async function loadDevMode() {
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     devMode.value = await invoke('load_dev_mode')
     console.log('[loadDevMode] Mode développeur chargé:', devMode.value)
   } catch (error) {
@@ -71,7 +71,6 @@ async function loadDevMode() {
 
 async function toggleDevMode() {
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     console.log('[toggleDevMode] Sauvegarde du mode développeur:', devMode.value)
     await invoke('save_dev_mode', { enabled: devMode.value })
     console.log('[toggleDevMode] Mode développeur sauvegardé:', devMode.value)
@@ -82,7 +81,6 @@ async function toggleDevMode() {
 
 async function loadStartHidden() {
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     startHidden.value = await invoke('load_start_hidden')
     console.log('[loadStartHidden] Démarrage masqué chargé:', startHidden.value)
   } catch (error) {
@@ -92,7 +90,6 @@ async function loadStartHidden() {
 
 async function toggleStartHidden() {
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     console.log('[toggleStartHidden] Sauvegarde du démarrage masqué:', startHidden.value)
     await invoke('save_start_hidden', { enabled: startHidden.value })
     console.log('[toggleStartHidden] Démarrage masqué sauvegardé:', startHidden.value)
@@ -103,7 +100,6 @@ async function toggleStartHidden() {
 
 async function loadUiReleaseTimeout() {
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     uiReleaseTimeout.value = await invoke('load_ui_release_timeout')
     console.log('[loadUiReleaseTimeout] Délai de libération chargé:', uiReleaseTimeout.value)
   } catch (error) {
@@ -114,7 +110,6 @@ async function loadUiReleaseTimeout() {
 async function setUiReleaseTimeout(value: string) {
   uiReleaseTimeout.value = Number(value)
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     console.log('[setUiReleaseTimeout] Sauvegarde du délai de libération:', uiReleaseTimeout.value)
     await invoke('save_ui_release_timeout', { seconds: uiReleaseTimeout.value })
   } catch (error) {
@@ -143,7 +138,6 @@ onMounted(async () => {
   // L'interface peut être rechargée alors qu'une lecture lancée sans GUI est
   // encore en cours : on resynchronise l'état du bouton.
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
     playback.isSpeaking.value = await invoke('is_playing')
   } catch (error) {
     console.error("Erreur lors de la récupération de l'état de lecture:", error)
