@@ -816,6 +816,16 @@ fn execute_speech_pipeline(
                 break;
             }
         }
+
+        // La lecture est terminée (ou remplacée) : libère le stream audio,
+        // sinon cpal/ALSA reste ouvert et réveille le CPU indéfiniment.
+        // Le test sur thread_id évite de couper une lecture plus récente.
+        if let Ok(mut guard) = CURRENT_SINK.lock() {
+            if guard.as_ref().map(|p| p.thread_id) == Some(thread_id) {
+                guard.take();
+                debug!("[THREAD#{}] Stream audio libéré", thread_id);
+            }
+        }
     });
 
     debug!("[{}] Sink créé et en cours de lecture", log_tag);
