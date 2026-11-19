@@ -1198,10 +1198,8 @@ pub fn run() {
         .run(|#[allow(unused_variables)] app, event| match event {
             // La destruction de la fenêtre (libération de l'interface) ne doit
             // pas quitter l'application : elle reste active dans la barre système.
-            tauri::RunEvent::ExitRequested { code, api, .. } => {
-                if code.is_none() {
-                    api.prevent_exit();
-                }
+            tauri::RunEvent::ExitRequested { code, api, .. } if code.is_none() => {
+                api.prevent_exit();
             }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
